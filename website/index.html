@@ -1,0 +1,1098 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NewsHub — Stories Worth Reading</title>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,500;0,9..144,600;0,9..144,700;0,9..144,900;1,9..144,500;1,9..144,600&family=Inter:wght@400;500;600;700&display=swap"
+        rel="stylesheet">
+
+    <style>
+        :root {
+            --serif: 'Fraunces', Georgia, serif;
+            --sans: 'Inter', Helvetica, Arial, sans-serif;
+        }
+
+        /* ============ THEME TOKENS ============ */
+        html[data-theme="light"] {
+            --bg: #F1ECE1;
+            --bg-elevated: #FDFBF7;
+            --text: #1C1815;
+            --text-muted: #726A5C;
+            --accent: #8B2318;
+            --accent-hover: #6E1B13;
+            --border: #DCD3C1;
+            --rule: #1C1815;
+            --shadow: rgba(28, 24, 21, 0.06);
+            --shadow-rest: rgba(28, 24, 21, 0.07);
+            --shadow-hover: rgba(28, 24, 21, 0.16);
+            --accent-glow: rgba(139, 35, 24, 0.16);
+            --accent-glow-soft: rgba(139, 35, 24, 0.08);
+            --img-filter: grayscale(35%);
+            --img-filter-hover: grayscale(0%);
+        }
+
+        html[data-theme="dark"] {
+            --bg: #15130F;
+            --bg-elevated: #1E1B16;
+            --text: #EDE6D8;
+            --text-muted: #A89E8C;
+            --accent: #E27060;
+            --accent-hover: #F08B7C;
+            --border: #37312A;
+            --rule: #EDE6D8;
+            --shadow: rgba(0, 0, 0, 0.35);
+            --shadow-rest: rgba(0, 0, 0, 0.25);
+            --shadow-hover: rgba(0, 0, 0, 0.55);
+            --accent-glow: rgba(226, 112, 96, 0.22);
+            --accent-glow-soft: rgba(226, 112, 96, 0.1);
+            --img-filter: grayscale(55%) brightness(0.85);
+            --img-filter-hover: grayscale(0%) brightness(1);
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            font-family: var(--sans);
+            background: var(--bg);
+            color: var(--text);
+            transition: background .25s ease, color .25s ease;
+        }
+
+        ::selection {
+            background: var(--accent);
+            color: #fff;
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            .card {
+                animation: none !important;
+                transition: box-shadow .3s ease, border-color .3s ease !important;
+            }
+
+            .card-image {
+                transition: filter .3s ease !important;
+                transform: none !important;
+            }
+        }
+
+        /* ============ MASTHEAD ============ */
+        header {
+            background: var(--bg);
+            border-bottom: 3px double var(--rule);
+        }
+
+        .masthead-top {
+            max-width: 1180px;
+            margin: auto;
+            padding: 14px 24px 0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-family: var(--sans);
+            font-size: 11.5px;
+            letter-spacing: .08em;
+            text-transform: uppercase;
+            color: var(--text-muted);
+        }
+
+        .masthead-top .edition {
+            font-weight: 600;
+        }
+
+        .theme-toggle {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            background: none;
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            padding: 5px 12px;
+            color: var(--text);
+            font-family: var(--sans);
+            font-size: 11.5px;
+            letter-spacing: .06em;
+            text-transform: uppercase;
+            cursor: pointer;
+            transition: border-color .2s, background .2s;
+        }
+
+        .theme-toggle:hover {
+            border-color: var(--accent);
+            color: var(--accent);
+        }
+
+        .masthead-main {
+            max-width: 1180px;
+            margin: auto;
+            padding: 6px 24px 22px;
+            text-align: center;
+        }
+
+        .masthead-main .logo {
+            font-family: var(--serif);
+            font-weight: 900;
+            font-size: clamp(44px, 7vw, 72px);
+            letter-spacing: -0.01em;
+            line-height: 1;
+            margin: 0;
+        }
+
+        .masthead-main .logo em {
+            font-style: italic;
+            font-weight: 500;
+            color: var(--accent);
+        }
+
+        .masthead-main .tagline {
+            margin-top: 8px;
+            font-family: var(--serif);
+            font-style: italic;
+            font-size: 15px;
+            color: var(--text-muted);
+        }
+
+        /* ============ NEW NEWS BANNER ============ */
+        #new-news {
+            display: none;
+            max-width: 1180px;
+            margin: 0 auto;
+            padding: 11px 24px;
+            background: var(--accent);
+            color: #FDFBF7;
+            cursor: pointer;
+            text-align: center;
+            font-family: var(--sans);
+            font-size: 13.5px;
+            font-weight: 600;
+            letter-spacing: .04em;
+            transition: background .2s;
+        }
+
+        #new-news:hover {
+            background: var(--accent-hover);
+        }
+
+        #new-news .star {
+            margin-right: 6px;
+        }
+
+        /* ============ CONTROLS ============ */
+        .controls {
+            max-width: 1180px;
+            margin: auto;
+            padding: 26px 24px 0;
+            display: flex;
+            gap: 14px;
+            flex-wrap: wrap;
+            align-items: center;
+            border-top: 1px solid var(--border);
+            padding-top: 20px;
+        }
+
+        .search-wrap {
+            flex: 1;
+            min-width: 260px;
+            position: relative;
+        }
+
+        .search {
+            width: 100%;
+            padding: 10px 4px;
+            border: none;
+            border-bottom: 1px solid var(--border);
+            background: transparent;
+            color: var(--text);
+            font-family: var(--sans);
+            font-size: 15px;
+            outline: none;
+            transition: border-color .2s;
+        }
+
+        .search::placeholder {
+            color: var(--text-muted);
+        }
+
+        .search:focus {
+            border-color: var(--accent);
+        }
+
+        select {
+            padding: 10px 30px 10px 4px;
+            border: none;
+            border-bottom: 1px solid var(--border);
+            background: transparent;
+            color: var(--text);
+            font-family: var(--sans);
+            font-size: 14.5px;
+            outline: none;
+            cursor: pointer;
+            appearance: none;
+            -webkit-appearance: none;
+            background-image: linear-gradient(45deg, transparent 50%, var(--text-muted) 50%), linear-gradient(135deg, var(--text-muted) 50%, transparent 50%);
+            background-position: calc(100% - 14px) 55%, calc(100% - 8px) 55%;
+            background-size: 6px 6px, 6px 6px;
+            background-repeat: no-repeat;
+        }
+
+        select:focus {
+            border-color: var(--accent);
+        }
+
+        /* ============ MAIN ============ */
+        main {
+            max-width: 1180px;
+            margin: auto;
+            padding: 24px 24px 20px;
+        }
+
+        .section-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+            border-bottom: 2px solid var(--rule);
+            margin-bottom: 26px;
+            padding-bottom: 10px;
+        }
+
+        .section-title {
+            margin: 0;
+            font-family: var(--serif);
+            font-weight: 700;
+            font-size: 26px;
+            letter-spacing: -0.01em;
+        }
+
+        .result-count {
+            color: var(--text-muted);
+            font-size: 13px;
+            font-variant-numeric: tabular-nums;
+        }
+
+        /* ============ NEWS GRID ============ */
+        .news-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 30px 26px;
+        }
+
+        /* ============ CARD ============ */
+        .card {
+            position: relative;
+            background: var(--bg-elevated);
+            border: 1px solid var(--border);
+            border-radius: 5px;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            isolation: isolate;
+            animation: cardAppear .5s cubic-bezier(.16, 1, .3, 1) backwards;
+            animation-delay: calc(var(--i, 0) * 45ms);
+            box-shadow: 0 1px 2px var(--shadow-rest);
+            transform: perspective(1000px) rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg)) translateZ(0) scale(var(--s, 1));
+            transition: transform .5s cubic-bezier(.16, 1, .3, 1), box-shadow .45s ease, border-color .35s ease;
+        }
+
+        .card.is-hovering {
+            border-color: var(--accent);
+            box-shadow: 0 26px 44px -18px var(--shadow-hover), 0 0 0 1px var(--accent-glow-soft);
+            --s: 1.012;
+        }
+
+        /* cursor-tracked sheen, sits above media, below text via z-index layering */
+        .card::after {
+            content: "";
+            position: absolute;
+            inset: 0;
+            z-index: 5;
+            background: radial-gradient(480px circle at var(--mx, 50%) var(--my, 50%), var(--accent-glow), transparent 55%);
+            opacity: 0;
+            transition: opacity .4s ease;
+            pointer-events: none;
+            mix-blend-mode: var(--sheen-blend, normal);
+        }
+
+        html[data-theme="dark"] .card::after {
+            --sheen-blend: screen;
+        }
+
+        .card.is-hovering::after {
+            opacity: 1;
+        }
+
+        /* accent rule that draws in from the left on hover */
+        .card::before {
+            content: "";
+            position: absolute;
+            top: 0;
+            left: 0;
+            height: 3px;
+            width: 0%;
+            background: var(--accent);
+            z-index: 6;
+            transition: width .5s cubic-bezier(.16, 1, .3, 1);
+        }
+
+        .card.is-hovering::before {
+            width: 100%;
+        }
+
+        @keyframes cardAppear {
+            from {
+                opacity: 0;
+                transform: translateY(14px) scale(.98);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0) scale(1);
+            }
+        }
+
+        .card-media {
+            position: relative;
+            display: block;
+            height: 200px;
+            overflow: hidden;
+            background: var(--border);
+        }
+
+        .card-image,
+        .image-placeholder {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+            background: var(--border);
+            filter: var(--img-filter);
+            transform: scale(1);
+            transition: filter .5s ease, transform .6s cubic-bezier(.16, 1, .3, 1);
+        }
+
+        .card.is-hovering .card-image {
+            filter: var(--img-filter-hover);
+            transform: scale(1.09);
+        }
+
+        .image-placeholder {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            color: var(--text-muted);
+            font-size: 34px;
+            font-family: var(--serif);
+        }
+
+        /* gradient scrim + arrow reveal on the media */
+        .media-scrim {
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(to top, rgba(0, 0, 0, .62) 0%, rgba(0, 0, 0, 0) 55%);
+            opacity: 0;
+            transition: opacity .4s ease;
+        }
+
+        .card.is-hovering .media-scrim {
+            opacity: 1;
+        }
+
+        .media-arrow {
+            position: absolute;
+            right: 14px;
+            bottom: 14px;
+            width: 34px;
+            height: 34px;
+            border-radius: 50%;
+            background: var(--accent);
+            color: #fff;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 15px;
+            opacity: 0;
+            transform: translateY(8px) scale(.85);
+            transition: opacity .35s ease, transform .35s cubic-bezier(.16, 1, .3, 1);
+        }
+
+        .card.is-hovering .media-arrow {
+            opacity: 1;
+            transform: translateY(0) scale(1);
+        }
+
+        .card-content {
+            position: relative;
+            z-index: 4;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            flex: 1;
+        }
+
+        .source {
+            display: flex;
+            align-items: center;
+            gap: 7px;
+            font-family: var(--sans);
+            font-size: 12.5px;
+            font-weight: 700;
+            color: var(--accent);
+            font-variant: small-caps;
+            letter-spacing: .03em;
+            margin-bottom: 10px;
+        }
+
+        .source::before {
+            content: "";
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: var(--accent);
+            transform: scale(.8);
+            transition: transform .3s cubic-bezier(.16, 1, .3, 1);
+        }
+
+        .card.is-hovering .source::before {
+            transform: scale(1.3);
+        }
+
+        .title {
+            font-family: var(--serif);
+            font-size: 20px;
+            font-weight: 600;
+            line-height: 1.32;
+            margin-bottom: 10px;
+            background-image: linear-gradient(var(--text), var(--text));
+            background-size: 0% 1px;
+            background-repeat: no-repeat;
+            background-position: 0 100%;
+            transition: background-size .5s cubic-bezier(.16, 1, .3, 1);
+        }
+
+        .card.is-hovering .title {
+            background-size: 100% 1px;
+        }
+
+        .description {
+            color: var(--text-muted);
+            font-size: 14px;
+            line-height: 1.55;
+            display: -webkit-box;
+            -webkit-line-clamp: 3;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+
+        .meta {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 10px;
+            margin-top: 16px;
+            padding-top: 14px;
+            border-top: 1px solid var(--border);
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
+        .read {
+            position: relative;
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            color: var(--accent);
+            text-decoration: none;
+            font-weight: 600;
+            white-space: nowrap;
+            font-family: var(--sans);
+            font-size: 13px;
+            letter-spacing: .01em;
+        }
+
+        .read::after {
+            content: "";
+            position: absolute;
+            left: 0;
+            bottom: -2px;
+            width: 100%;
+            height: 1px;
+            background: currentColor;
+            transform: scaleX(0);
+            transform-origin: right;
+            transition: transform .35s cubic-bezier(.16, 1, .3, 1);
+        }
+
+        .read:hover {
+            color: var(--accent-hover);
+        }
+
+        .read:hover::after {
+            transform: scaleX(1);
+            transform-origin: left;
+        }
+
+        .read .arrow {
+            display: inline-block;
+            transition: transform .35s cubic-bezier(.16, 1, .3, 1);
+        }
+
+        .read:hover .arrow {
+            transform: translateX(3px);
+        }
+
+        /* ============ PAGINATION ============ */
+        .pagination {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 4px;
+            margin: 44px 0 20px;
+            flex-wrap: wrap;
+            font-family: var(--sans);
+        }
+
+        .pagination button {
+            border: none;
+            background: none;
+            padding: 8px 12px;
+            color: var(--text);
+            cursor: pointer;
+            font-size: 14px;
+            font-family: var(--sans);
+            border-bottom: 2px solid transparent;
+            transition: border-color .2s, color .2s;
+        }
+
+        .pagination button:hover:not(:disabled) {
+            border-color: var(--text-muted);
+        }
+
+        .pagination button.active {
+            color: var(--accent);
+            border-color: var(--accent);
+            font-weight: 700;
+        }
+
+        .pagination button:disabled {
+            opacity: .35;
+            cursor: not-allowed;
+        }
+
+        /* ============ LOADING ============ */
+        .loading {
+            grid-column: 1 / -1;
+            text-align: center;
+            padding: 80px 20px;
+            color: var(--text-muted);
+            font-size: 15px;
+            font-family: var(--sans);
+            border: 1px solid var(--border);
+            border-radius: 5px;
+        }
+
+        .spinner {
+            width: 30px;
+            height: 30px;
+            border: 2px solid var(--border);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin .8s linear infinite;
+            margin: 0 auto 16px;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        /* ============ EMPTY ============ */
+        .empty {
+            grid-column: 1 / -1;
+            text-align: center;
+            padding: 80px 20px;
+            color: var(--text-muted);
+            font-family: var(--sans);
+            border: 1px solid var(--border);
+            border-radius: 5px;
+        }
+
+        .empty-icon {
+            font-size: 38px;
+            margin-bottom: 12px;
+            font-family: var(--serif);
+        }
+
+        /* ============ MOBILE ============ */
+        @media (max-width: 600px) {
+            .masthead-top {
+                padding: 12px 16px 0;
+            }
+
+            .masthead-main {
+                padding: 6px 16px 18px;
+            }
+
+            .controls {
+                padding: 18px 16px 0;
+            }
+
+            main {
+                padding: 18px 16px 15px;
+            }
+
+            .section-title {
+                font-size: 21px;
+            }
+
+            .news-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .card-image,
+            .image-placeholder {
+                height: 210px;
+            }
+
+            #new-news {
+                padding: 11px 16px;
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+    <header>
+        <div class="masthead-top">
+            <span class="edition">Dhaka Edition</span>
+            <button id="theme-toggle" class="theme-toggle" aria-label="Toggle dark mode">
+                <span id="theme-icon">🌙</span> <span id="theme-label">Dark</span>
+            </button>
+            <span id="masthead-date"></span>
+        </div>
+        <div class="masthead-main">
+            <h1 class="logo">News<em>Hub</em></h1>
+            <p class="tagline">Stories worth reading, gathered daily</p>
+        </div>
+    </header>
+
+    <div id="new-news"><span class="star">★</span>New news available — click to view</div>
+
+    <div class="controls">
+        <div class="search-wrap">
+            <input id="search" class="search" type="text" placeholder="Search news…">
+        </div>
+        <select id="source">
+            <option value="">All Sources</option>
+        </select>
+    </div>
+
+    <main>
+        <div class="section-header">
+            <h2 class="section-title">Latest News</h2>
+            <div id="result-count" class="result-count"></div>
+        </div>
+
+        <div id="news" class="news-grid"></div>
+        <div id="pagination" class="pagination"></div>
+    </main>
+
+    <script>
+
+        /* =========================
+           CONFIG
+        ========================= */
+        const CONFIG = {
+            API_BASE: "/api",
+            NEWS_PER_PAGE: 12,
+            NEW_NEWS_CHECK_INTERVAL: 30000,
+            SEARCH_DEBOUNCE: 400
+        };
+
+        // Change API_BASE only when the backend location changes.
+        // For Vercel same-domain deployment: "/api"
+        // For local separate FastAPI server: "http://127.0.0.1:8000/api"
+        function apiUrl(path = "") {
+                const base = CONFIG.API_BASE.replace(/\/$/, "");
+                const endpoint = String(path).replace(/^\//, "");
+                return endpoint ? `${base}/${endpoint}` : base;
+        }
+
+        async function apiFetch(path, options = {}) {
+            return fetch(apiUrl(path), options);
+        }
+
+        /* =========================
+           STATE
+        ========================= */
+        let currentPage = 1;
+        let searchTimer = null;
+        let latestKnownId = null;
+
+        /* =========================
+           DOM
+        ========================= */
+        const newsContainer = document.getElementById("news");
+        const pagination = document.getElementById("pagination");
+        const search = document.getElementById("search");
+        const source = document.getElementById("source");
+        const resultCount = document.getElementById("result-count");
+        const newNews = document.getElementById("new-news");
+        const themeToggle = document.getElementById("theme-toggle");
+        const themeIcon = document.getElementById("theme-icon");
+        const themeLabel = document.getElementById("theme-label");
+        const mastheadDate = document.getElementById("masthead-date");
+
+        /* =========================
+           THEME
+        ========================= */
+        function applyTheme(theme) {
+            document.documentElement.setAttribute("data-theme", theme);
+            if (theme === "dark") {
+                themeIcon.textContent = "☀️";
+                themeLabel.textContent = "Light";
+            } else {
+                themeIcon.textContent = "🌙";
+                themeLabel.textContent = "Dark";
+            }
+        }
+
+        themeToggle.addEventListener("click", () => {
+            const current = document.documentElement.getAttribute("data-theme");
+            applyTheme(current === "dark" ? "light" : "dark");
+        });
+
+        // Default to the visitor's system preference, in-memory only.
+        applyTheme(window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+
+        /* =========================
+           MASTHEAD DATE
+        ========================= */
+        mastheadDate.textContent = new Date().toLocaleDateString(undefined, {
+            weekday: "long", day: "numeric", month: "long", year: "numeric"
+        });
+
+        /* =========================
+           LOAD SOURCES
+        ========================= */
+        async function loadSources() {
+            try {
+                const response = await apiFetch("sources");
+                if (!response.ok) throw new Error("Source API failed");
+                const sources = await response.json();
+                sources.forEach(item => {
+                    const option = document.createElement("option");
+                    option.value = item;
+                    option.textContent = item;
+                    source.appendChild(option);
+                });
+            } catch (error) {
+                console.error("Source loading error:", error);
+            }
+        }
+
+        /* =========================
+           LOAD NEWS
+        ========================= */
+        async function loadNews(page = 1) {
+            currentPage = page;
+
+            newsContainer.innerHTML = `
+        <div class="loading">
+          <div class="spinner"></div>
+          Loading news...
+        </div>
+      `;
+
+            const params = new URLSearchParams();
+            params.set("page", page);
+            params.set("limit", CONFIG.NEWS_PER_PAGE);
+            if (source.value) params.set("source", source.value);
+            if (search.value.trim()) params.set("search", search.value.trim());
+
+            try {
+                const response = await apiFetch(`news?${params}`);
+                if (!response.ok) throw new Error("News API failed");
+                const data = await response.json();
+
+                renderNews(data.news);
+                renderPagination(data.page, data.total_pages);
+                resultCount.textContent = `${data.total} stories`;
+
+                if (page === 1 && data.news.length > 0) {
+                    latestKnownId = data.news[0].id;
+                }
+            } catch (error) {
+                console.error("News loading error:", error);
+                newsContainer.innerHTML = `
+          <div class="empty">
+            <div class="empty-icon">⚠</div>
+            <div>Failed to load news.</div>
+          </div>
+        `;
+            }
+        }
+
+        /* =========================
+           RENDER NEWS
+        ========================= */
+        function renderNews(news) {
+            if (!news.length) {
+                newsContainer.innerHTML = `
+          <div class="empty">
+            <div class="empty-icon">✦</div>
+            <div>No news found.</div>
+          </div>
+        `;
+                return;
+            }
+
+            newsContainer.innerHTML = "";
+
+            const canTilt = window.matchMedia("(hover: hover) and (pointer: fine)").matches
+                && !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+            news.forEach((item, index) => {
+                const card = document.createElement("article");
+                card.className = "card";
+                card.dataset.newsId = item.id;
+                card.style.setProperty("--i", index);
+
+                let imageHTML;
+                if (item.image) {
+                    imageHTML = `
+            <img
+              class="card-image"
+              src="${escapeHtml(item.image)}"
+              alt="${escapeHtml(item.title)}"
+              loading="lazy"
+              onerror="this.outerHTML='<div class=&quot;image-placeholder&quot;>✦</div>'"
+            >
+          `;
+                } else {
+                    imageHTML = `<div class="image-placeholder">✦</div>`;
+                }
+
+                card.innerHTML = `
+          <a class="card-media" href="${escapeHtml(item.url)}" target="_blank" rel="noopener noreferrer" tabindex="-1" aria-hidden="true">
+            ${imageHTML}
+            <div class="media-scrim"></div>
+            <span class="media-arrow">↗</span>
+          </a>
+          <div class="card-content">
+            <div class="source">${escapeHtml(item.source)}</div>
+            <div class="title">${escapeHtml(item.title)}</div>
+            ${item.description ? `<div class="description">${escapeHtml(item.description)}</div>` : ""}
+            <div class="meta">
+              <span>${timeAgo(item.published_at)}</span>
+              <a class="read" href="${escapeHtml(item.url)}" target="_blank" rel="noopener noreferrer">
+                Read <span class="arrow">→</span>
+              </a>
+            </div>
+          </div>
+        `;
+
+                if (canTilt) {
+                    attachCardInteraction(card);
+                } else {
+                    card.addEventListener("mouseenter", () => card.classList.add("is-hovering"));
+                }
+                card.addEventListener("mouseleave", () => card.classList.remove("is-hovering"));
+
+                newsContainer.appendChild(card);
+            });
+        }
+
+        /* =========================
+           CARD TILT + SPOTLIGHT
+        ========================= */
+        function attachCardInteraction(card) {
+            const maxTilt = 5; // degrees
+
+            card.addEventListener("mousemove", (e) => {
+                const rect = card.getBoundingClientRect();
+                const px = (e.clientX - rect.left) / rect.width;
+                const py = (e.clientY - rect.top) / rect.height;
+
+                const ry = (px - 0.5) * (maxTilt * 2);
+                const rx = (0.5 - py) * (maxTilt * 2);
+
+                card.style.setProperty("--rx", `${rx}deg`);
+                card.style.setProperty("--ry", `${ry}deg`);
+                card.style.setProperty("--mx", `${px * 100}%`);
+                card.style.setProperty("--my", `${py * 100}%`);
+                card.classList.add("is-hovering");
+            });
+
+            card.addEventListener("mouseleave", () => {
+                card.style.setProperty("--rx", "0deg");
+                card.style.setProperty("--ry", "0deg");
+            });
+        }
+
+        /* =========================
+           PAGINATION
+        ========================= */
+        function renderPagination(current, total) {
+            pagination.innerHTML = "";
+            if (total <= 1) return;
+
+            const previous = document.createElement("button");
+            previous.textContent = "← Previous";
+            previous.disabled = current === 1;
+            previous.onclick = () => {
+                if (current > 1) {
+                    loadNews(current - 1);
+                    window.scrollTo({ top: 0, behavior: "smooth" });
+                }
+            };
+            pagination.appendChild(previous);
+
+            let start = Math.max(1, current - 2);
+            let end = Math.min(total, current + 2);
+
+            if (start > 1) {
+                addPageButton(1);
+                if (start > 2) addDots();
+            }
+
+            for (let i = start; i <= end; i++) addPageButton(i);
+
+            if (end < total) {
+                if (end < total - 1) addDots();
+                addPageButton(total);
+            }
+
+            const next = document.createElement("button");
+            next.textContent = "Next →";
+            next.disabled = current === total;
+            next.onclick = () => {
+                if (current < total) {
+                    loadNews(current + 1);
+                    window.scrollTo({ top: 0, behavior: "smooth" });
+                }
+            };
+            pagination.appendChild(next);
+        }
+
+        function addPageButton(page) {
+            const button = document.createElement("button");
+            button.textContent = page;
+            if (page === currentPage) button.className = "active";
+            button.onclick = () => {
+                loadNews(page);
+                window.scrollTo({ top: 0, behavior: "smooth" });
+            };
+            pagination.appendChild(button);
+        }
+
+        function addDots() {
+            const dots = document.createElement("span");
+            dots.textContent = "...";
+            dots.style.padding = "0 6px";
+            dots.style.color = "var(--text-muted)";
+            pagination.appendChild(dots);
+        }
+
+        /* =========================
+           SEARCH / FILTER
+        ========================= */
+        search.addEventListener("input", () => {
+            clearTimeout(searchTimer);
+            searchTimer = setTimeout(() => loadNews(1), CONFIG.SEARCH_DEBOUNCE);
+        });
+
+        source.addEventListener("change", () => loadNews(1));
+
+        /* =========================
+           CHECK FOR NEW NEWS
+        ========================= */
+        async function checkForNewNews() {
+            try {
+                const response = await apiFetch("news?page=1&limit=1");
+                if (!response.ok) return;
+                const data = await response.json();
+                if (!data.news || data.news.length === 0) return;
+
+                const latestId = data.news[0].id;
+
+                if (latestKnownId === null) {
+                    latestKnownId = latestId;
+                    return;
+                }
+
+                if (latestId !== latestKnownId) {
+                    newNews.style.display = "block";
+                }
+            } catch (error) {
+                console.error("New news check failed:", error);
+            }
+        }
+
+        newNews.addEventListener("click", () => {
+            newNews.style.display = "none";
+            latestKnownId = null;
+            loadNews(1);
+            window.scrollTo({ top: 0, behavior: "smooth" });
+        });
+
+        /* =========================
+           TIME AGO
+        ========================= */
+        function timeAgo(dateString) {
+            if (!dateString) return "";
+            const date = new Date(dateString);
+            if (Number.isNaN(date.getTime())) return "";
+
+            const seconds = Math.floor((Date.now() - date.getTime()) / 1000);
+            if (seconds < 60) return "Just now";
+
+            const minutes = Math.floor(seconds / 60);
+            if (minutes < 60) return `${minutes}m ago`;
+
+            const hours = Math.floor(minutes / 60);
+            if (hours < 24) return `${hours}h ago`;
+
+            const days = Math.floor(hours / 24);
+            if (days < 7) return `${days}d ago`;
+
+            return date.toLocaleDateString();
+        }
+
+        /* =========================
+           HTML ESCAPE
+        ========================= */
+        function escapeHtml(value) {
+            return String(value)
+                .replaceAll("&", "&amp;")
+                .replaceAll("<", "&lt;")
+                .replaceAll(">", "&gt;")
+                .replaceAll('"', "&quot;")
+                .replaceAll("'", "&#039;");
+        }
+
+        /* =========================
+           INITIAL LOAD
+        ========================= */
+        async function initialize() {
+            await loadSources();
+            await loadNews(1);
+        }
+
+        initialize();
+
+        setInterval(checkForNewNews, CONFIG.NEW_NEWS_CHECK_INTERVAL);
+
+    </script>
+
+</body>
+
+</html>
