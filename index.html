@@ -711,23 +711,49 @@
            CONFIG
         ========================= */
         const CONFIG = {
-            API_BASE: "/api",
+            API_BASE: "auto",
             NEWS_PER_PAGE: 12,
             NEW_NEWS_CHECK_INTERVAL: 30000,
             SEARCH_DEBOUNCE: 400
         };
 
-        // Change API_BASE only when the backend location changes.
-        // For Vercel same-domain deployment: "/api"
-        // For local separate FastAPI server: "http://127.0.0.1:8000/api"
-        function apiUrl(path = "") {
-                const base = CONFIG.API_BASE.replace(/\/$/, "");
-                const endpoint = String(path).replace(/^\//, "");
-                return endpoint ? `${base}/${endpoint}` : base;
+        /*
+         * API configuration:
+         * - Local development uses http://127.0.0.1:8000/api
+         * - Vercel production uses the same-domain /api endpoint
+         * - "auto" selects the correct one automatically.
+         */
+        function getApiBase() {
+            if (
+                CONFIG.API_BASE === "auto" &&
+                (
+                    window.location.hostname === "localhost" ||
+                    window.location.hostname === "127.0.0.1"
+                )
+            ) {
+                return "http://127.0.0.1:8000/api";
+            }
+
+            if (CONFIG.API_BASE === "auto") {
+                return "/api";
+            }
+
+            return CONFIG.API_BASE.replace(/\/$/, "");
         }
 
-        async function apiFetch(path, options = {}) {
-            return fetch(apiUrl(path), options);
+        function apiUrl(path = "") {
+            const base = getApiBase();
+            const endpoint = String(path).replace(/^\//, "");
+
+            return endpoint
+                ? `${base}/${endpoint}`
+                : base;
+        }
+
+        async function apiFetch(path = "", options = {}) {
+            const url = apiUrl(path);
+            console.log("API Request:", url);
+            return fetch(url, options);
         }
 
         /* =========================
