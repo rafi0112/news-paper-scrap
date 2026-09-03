@@ -5,10 +5,6 @@ from supabase import create_client
 
 load_dotenv()
 
-# =========================
-# Environment Variables
-# =========================
-
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 
@@ -17,13 +13,12 @@ FACEBOOK_PAGE_ACCESS_TOKEN = os.getenv("FACEBOOK_PAGE_ACCESS_TOKEN")
 
 META_GRAPH_VERSION = os.getenv(
     "META_GRAPH_VERSION",
-    "v25.0"
+    "v26.0"
 )
 
-
-# =========================
-# Validate Environment
-# =========================
+# --------------------------------------------------
+# Validate environment variables
+# --------------------------------------------------
 
 if not SUPABASE_URL or not SUPABASE_KEY:
     raise RuntimeError(
@@ -35,10 +30,9 @@ if not FACEBOOK_PAGE_ID or not FACEBOOK_PAGE_ACCESS_TOKEN:
         "FACEBOOK_PAGE_ID and FACEBOOK_PAGE_ACCESS_TOKEN are required"
     )
 
-
-# =========================
-# Supabase Client
-# =========================
+# --------------------------------------------------
+# Supabase client
+# --------------------------------------------------
 
 supabase = create_client(
     SUPABASE_URL,
@@ -46,11 +40,12 @@ supabase = create_client(
 )
 
 
-# =========================
-# Get Unposted News
-# =========================
+# --------------------------------------------------
+# Get ALL unposted news
+# --------------------------------------------------
 
 def get_unposted_news():
+
     result = (
         supabase
         .table("news")
@@ -59,18 +54,18 @@ def get_unposted_news():
         )
         .eq("facebook_posted", False)
         .order("published_at", desc=False)
-        .limit(1)
         .execute()
     )
 
-    return result.data
+    return result.data or []
 
 
-# =========================
-# Mark Facebook Posted
-# =========================
+# --------------------------------------------------
+# Mark successful post
+# --------------------------------------------------
 
 def mark_posted(news_id, facebook_post_id):
+
     (
         supabase
         .table("news")
@@ -85,11 +80,12 @@ def mark_posted(news_id, facebook_post_id):
     )
 
 
-# =========================
-# Save Facebook Error
-# =========================
+# --------------------------------------------------
+# Mark failed post
+# --------------------------------------------------
 
 def mark_error(news_id, error):
+
     (
         supabase
         .table("news")
@@ -101,9 +97,9 @@ def mark_error(news_id, error):
     )
 
 
-# =========================
-# Post Photo to Facebook
-# =========================
+# --------------------------------------------------
+# Post one article to Facebook
+# --------------------------------------------------
 
 def post_to_facebook(article):
 
@@ -113,37 +109,33 @@ def post_to_facebook(article):
         f"{FACEBOOK_PAGE_ID}/photos"
     )
 
-    # Facebook post text
-    message = (
+    caption = (
         f"📰 {article['title']}\n\n"
         f"Source: {article['source']}"
     )
 
-    # Send photo + caption to Facebook
     response = requests.post(
         facebook_url,
         data={
             "url": article["image"],
-            "caption": message,
+            "caption": caption,
             "access_token": FACEBOOK_PAGE_ACCESS_TOKEN,
         },
         timeout=30,
     )
 
-    # Convert response to JSON
     try:
         data = response.json()
+
     except Exception:
         raise RuntimeError(
             f"Facebook returned invalid response: "
             f"{response.text}"
         )
 
-    # Check Facebook API error
     if not response.ok or "error" in data:
         raise RuntimeError(data)
 
-    # Facebook can return either id or post_id
     facebook_post_id = (
         data.get("post_id")
         or data.get("id")
@@ -157,73 +149,136 @@ def post_to_facebook(article):
     return facebook_post_id
 
 
-# =========================
+# --------------------------------------------------
 # Main
-# =========================
+# --------------------------------------------------
 
 def main():
 
     articles = get_unposted_news()
 
-    # No new article
     if not articles:
-        print("No unposted news found.")
-        return
 
-    article = articles[0]
+        print(
+            "No unposted news found."
+        )
+
+        return
 
     print(
-        "Posting:",
-        article["title"]
+        f"Found {len(articles)} unposted news."
     )
 
-    # Article must have image
-    if not article.get("image"):
-        print("No image. Skipping.")
+    successful = 0
+    failed = 0
+    skipped = 0
 
-        mark_error(
-            article["id"],
-            "Article has no image."
+    # ----------------------------------------------
+    # Post ALL unposted articles
+    # ----------------------------------------------
+
+    for index, article in enumerate(
+        articles,
+        start=1
+    ):
+
+        print(
+            f"\n[{index}/{len(articles)}] "
+            f"Posting: {article['title']}"
         )
 
-        return
+        # ------------------------------------------
+        # Check image
+        # ------------------------------------------
 
-    try:
+        if not article.get("image"):
 
+            print(
+                "No image. Skipping."
+            )
+
+            mark_error(
+                article["id"],
+                "Article has no image."
+            )
+
+            skipped += 1
+
+            continue
+
+        # ------------------------------------------
         # Post to Facebook
-        facebook_post_id = post_to_facebook(article)
+        # ------------------------------------------
 
-        # Mark as posted in Supabase
-        mark_posted(
-            article["id"],
-            facebook_post_id
-        )
+        try:
 
-        print(
-            "Facebook post successful:",
-            facebook_post_id
-        )
+            facebook_post_id = post_to_facebook(
+                article
+            )
 
-    except Exception as e:
+            mark_posted(
+                article["id"],
+                facebook_post_id
+            )
 
-        print(
-            "Facebook posting failed:",
-            e
-        )
+            successful += 1
 
-        # Save error but keep facebook_posted = false
-        mark_error(
-            article["id"],
-            e
-        )
+            print(
+                "Facebook post successful:",
+                facebook_post_id
+            )
 
-        # Make GitHub Actions show failure
-        raise
+        except Exception as e:
+
+            failed += 1
+
+            print(
+                "Facebook posting failed:",
+                e
+            )
+
+            mark_error(
+                article["id"],
+                e
+            )
+
+            # --------------------------------------
+            # IMPORTANT:
+            # Don't stop.
+            # Continue with next news.
+            # --------------------------------------
+
+            continue
+
+    # ----------------------------------------------
+    # Final summary
+    # ----------------------------------------------
+
+    print("\n===================================")
+    print("Facebook posting completed")
+    print("===================================")
+    print(
+        "Total found:",
+        len(articles)
+    )
+    print(
+        "Successful:",
+        successful
+    )
+    print(
+        "Failed:",
+        failed
+    )
+    print(
+        "Skipped:",
+        skipped
+    )
+    print("===================================")
 
 
-# =========================
+# --------------------------------------------------
 # Run
-# =========================
+# --------------------------------------------------
 
 if __name__ == "__main__":
     main()
