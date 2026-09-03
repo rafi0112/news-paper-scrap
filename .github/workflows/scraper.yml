@@ -37,6 +37,6 @@ jobs:
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
           FACEBOOK_PAGE_ID: ${{ secrets.FACEBOOK_PAGE_ID }}
           FACEBOOK_PAGE_ACCESS_TOKEN: ${{ secrets.FACEBOOK_PAGE_ACCESS_TOKEN }}
-          META_GRAPH_VERSION: "v23.0"
+          META_GRAPH_VERSION: "v25.0"
         run: |
           python facebook_poster.py
