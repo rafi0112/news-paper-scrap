@@ -253,7 +253,7 @@ This makes the system able to retry failed articles later instead of permanently
 
 ---
 
-# 8. Two-day automatic deletion
+# 8. One-day automatic deletion
 
 The project intentionally keeps recent news only.
 
@@ -266,7 +266,7 @@ language sql
 as $$
     delete from news
     where published_at is not null
-      and published_at < now() - interval '2 days';
+      and published_at < now() - interval '1 day';
 $$;
 ```
 
@@ -283,7 +283,7 @@ Command:
 select delete_old_news();
 ```
 
-This checks every hour and deletes rows whose `published_at` is older than 2 days.
+This checks every hour and deletes rows whose `published_at` is older than 1 day.
 
 It does **not** care whether:
 
@@ -297,7 +297,7 @@ or
 facebook_posted = FALSE
 ```
 
-If the news is older than 2 days, it is deleted.
+If the news is older than 1 day, it is deleted.
 
 Supabase supports database functions through its SQL editor, and PostgreSQL functions can perform database-side logic such as this cleanup. citeturn0search14
 
