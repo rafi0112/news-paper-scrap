@@ -56,7 +56,16 @@ Current Facebook sources:
 
 \- The Daily Star is intentionally \*\***excluded from Facebook posting**\*\*
 
+<<<<<<< HEAD
 The Daily Star is still allowed to exist in the news database if the scraper collects it, but \`facebook\_poster.py\` ignores rows whose source is exactly \`The Daily Star\`.
+=======
+<img 
+  width="1536" 
+  height="1024" 
+  alt="System Architecture" 
+  src="https://github.com/user-attachments/assets/b6a6e6bf-7ed7-4ac9-b3f3-df150e9722c6"
+/>
+>>>>>>> a4aae5e9ec3e2c6dd480f903426f6cea047cb64e
 
 \---
 
@@ -334,7 +343,11 @@ This makes the system able to retry failed articles later instead of permanently
 
 \---
 
+<<<<<<< HEAD
 \# **8. One-day automatic deletion**
+=======
+# 8. One-day automatic deletion
+>>>>>>> a4aae5e9ec3e2c6dd480f903426f6cea047cb64e
 
 The project intentionally keeps recent news only.
 
@@ -349,6 +362,7 @@ returns void
 language sql
 
 as $$
+<<<<<<< HEAD
 
     delete from news
 
@@ -356,6 +370,11 @@ as $$
 
       and published\_at < now() - interval '1 day';
 
+=======
+    delete from news
+    where published_at is not null
+      and published_at < now() - interval '1 day';
+>>>>>>> a4aae5e9ec3e2c6dd480f903426f6cea047cb64e
 $$;
 
 \`\`\`
@@ -374,7 +393,11 @@ Schedule:
 
 Command:
 
+<<<<<<< HEAD
 select delete\_old\_news();
+=======
+This checks every hour and deletes rows whose `published_at` is older than 1 day.
+>>>>>>> a4aae5e9ec3e2c6dd480f903426f6cea047cb64e
 
 \`\`\`
 
@@ -392,10 +415,13 @@ or
 
 \`\`\`text
 
+<<<<<<< HEAD
 facebook\_posted = FALSE
 
 \`\`\`
 
+=======
+>>>>>>> a4aae5e9ec3e2c6dd480f903426f6cea047cb64e
 If the news is older than 1 day, it is deleted.
 
 Supabase supports database functions through its SQL editor, and PostgreSQL functions can perform database-side logic such as this cleanup. citeturn0search14
