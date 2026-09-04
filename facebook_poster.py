@@ -22,16 +22,13 @@ FACEBOOK_PAGE_ACCESS_TOKEN = os.getenv(
 
 GRAPH_VERSION = os.getenv(
     "META_GRAPH_VERSION",
-    "v26.0"
+    "v25.0"
 )
 
-# প্রথমে 1 দিয়ে test করো
+# First test with 1
 MAX_POSTS_PER_RUN = 1
 
 CARD_SIZE = 1200
-
-FONT_REGULAR = "fonts/NotoSansBengali-Regular.ttf"
-FONT_BOLD = "fonts/NotoSansBengali-Bold.ttf"
 
 
 # =========================
@@ -48,15 +45,53 @@ supabase = create_client(
 # FONT
 # =========================
 
-def get_font(path, size):
-    return ImageFont.truetype(path, size)
+def get_font(size, bold=False):
+
+    # GitHub Ubuntu fonts
+    if bold:
+        paths = [
+            "/usr/share/fonts/truetype/noto/"
+            "NotoSans-Bold.ttf",
+
+            "/usr/share/fonts/truetype/dejavu/"
+            "DejaVuSans-Bold.ttf",
+        ]
+
+    else:
+        paths = [
+            "/usr/share/fonts/truetype/noto/"
+            "NotoSans-Regular.ttf",
+
+            "/usr/share/fonts/truetype/dejavu/"
+            "DejaVuSans.ttf",
+        ]
+
+    for path in paths:
+
+        if os.path.exists(path):
+
+            try:
+                return ImageFont.truetype(
+                    path,
+                    size
+                )
+            except Exception:
+                pass
+
+    # Final fallback
+    return ImageFont.load_default()
 
 
 # =========================
 # TEXT WRAP
 # =========================
 
-def wrap_text(draw, text, font, max_width):
+def wrap_text(
+    draw,
+    text,
+    font,
+    max_width
+):
 
     words = text.split()
 
@@ -80,7 +115,9 @@ def wrap_text(draw, text, font, max_width):
         width = bbox[2] - bbox[0]
 
         if width <= max_width:
+
             current = test
+
         else:
 
             if current:
@@ -106,6 +143,10 @@ def create_photo_card(
 
     try:
 
+        # --------------------------------
+        # Download image
+        # --------------------------------
+
         response = requests.get(
             image_url,
             timeout=20,
@@ -118,46 +159,40 @@ def create_photo_card(
         response.raise_for_status()
 
         image = Image.open(
-            io.BytesIO(response.content)
+            io.BytesIO(
+                response.content
+            )
         ).convert("RGB")
 
         # --------------------------------
-        # Center crop → 1200x1200
+        # Center crop
         # --------------------------------
 
         width, height = image.size
 
-        target_ratio = 1
+        if width > height:
 
-        current_ratio = width / height
-
-        if current_ratio > target_ratio:
-
-            new_width = int(
-                height * target_ratio
-            )
+            crop = height
 
             left = (
-                width - new_width
+                width - crop
             ) // 2
 
             image = image.crop(
                 (
                     left,
                     0,
-                    left + new_width,
+                    left + crop,
                     height
                 )
             )
 
-        else:
+        elif height > width:
 
-            new_height = int(
-                width / target_ratio
-            )
+            crop = width
 
             top = (
-                height - new_height
+                height - crop
             ) // 2
 
             image = image.crop(
@@ -165,17 +200,24 @@ def create_photo_card(
                     0,
                     top,
                     width,
-                    top + new_height
+                    top + crop
                 )
             )
 
+        # --------------------------------
+        # Resize
+        # --------------------------------
+
         image = image.resize(
-            (CARD_SIZE, CARD_SIZE),
+            (
+                CARD_SIZE,
+                CARD_SIZE
+            ),
             Image.Resampling.LANCZOS
         )
 
         # --------------------------------
-        # Overlay
+        # Bottom dark overlay
         # --------------------------------
 
         overlay = Image.new(
@@ -188,35 +230,35 @@ def create_photo_card(
             overlay
         )
 
-        # Clean dark gradient at bottom
-        gradient_height = 500
+        gradient_height = 550
 
         for y in range(
             CARD_SIZE - gradient_height,
             CARD_SIZE
         ):
 
+            progress = (
+                y -
+                (CARD_SIZE - gradient_height)
+            ) / gradient_height
+
             alpha = int(
-                220 *
-                (
-                    y -
-                    (CARD_SIZE - gradient_height)
-                )
-                / gradient_height
+                230 * progress
             )
 
             overlay_draw.line(
-                [
-                    (
-                        0,
-                        y
-                    ),
-                    (
-                        CARD_SIZE,
-                        y
-                    )
-                ],
-                fill=(0, 0, 0, alpha)
+                (
+                    0,
+                    y,
+                    CARD_SIZE,
+                    y
+                ),
+                fill=(
+                    0,
+                    0,
+                    0,
+                    alpha
+                )
             )
 
         image = Image.alpha_composite(
@@ -231,23 +273,23 @@ def create_photo_card(
         # --------------------------------
 
         source_font = get_font(
-            FONT_BOLD,
-            42
+            38,
+            bold=True
         )
 
         title_font = get_font(
-            FONT_BOLD,
-            68
+            62,
+            bold=True
         )
 
         # --------------------------------
-        # Source
+        # Source badge
         # --------------------------------
 
         source_text = source.upper()
 
         source_x = 70
-        source_y = 735
+        source_y = 745
 
         bbox = draw.textbbox(
             (0, 0),
@@ -259,16 +301,22 @@ def create_photo_card(
             bbox[2] - bbox[0]
         )
 
-        # Source badge
         draw.rounded_rectangle(
             (
                 source_x - 18,
-                source_y - 12,
-                source_x + source_width + 18,
+                source_y - 10,
+                source_x +
+                source_width +
+                18,
                 source_y + 52
             ),
             radius=12,
-            fill=(255, 255, 255, 235)
+            fill=(
+                255,
+                255,
+                255,
+                235
+            )
         )
 
         draw.text(
@@ -278,7 +326,11 @@ def create_photo_card(
             ),
             source_text,
             font=source_font,
-            fill=(20, 20, 20)
+            fill=(
+                20,
+                20,
+                20
+            )
         )
 
         # --------------------------------
@@ -292,7 +344,7 @@ def create_photo_card(
             CARD_SIZE - 140
         )
 
-        # Keep maximum 4 lines
+        # Maximum 4 lines
         title_lines = title_lines[:4]
 
         y = 825
@@ -307,8 +359,8 @@ def create_photo_card(
                 line,
                 font=title_font,
                 fill="white",
-                stroke_width=1,
-                stroke_fill=(0, 0, 0)
+                stroke_width=2,
+                stroke_fill="black"
             )
 
             bbox = draw.textbbox(
@@ -321,10 +373,12 @@ def create_photo_card(
                 bbox[3] - bbox[1]
             )
 
-            y += line_height + 12
+            y += (
+                line_height + 10
+            )
 
         # --------------------------------
-        # Save
+        # Save JPEG in memory
         # --------------------------------
 
         output = io.BytesIO()
@@ -351,7 +405,7 @@ def create_photo_card(
 
 
 # =========================
-# FACEBOOK POST
+# POST TO FACEBOOK
 # =========================
 
 def post_to_facebook(
@@ -385,7 +439,7 @@ def post_to_facebook(
     data = {
         "caption": caption,
         "access_token":
-            FACEBOOK_PAGE_ACCESS_TOKEN
+        FACEBOOK_PAGE_ACCESS_TOKEN
     }
 
     response = requests.post(
@@ -430,7 +484,9 @@ def get_unposted_news():
             "published_at",
             desc=True
         )
-        .limit(MAX_POSTS_PER_RUN)
+        .limit(
+            MAX_POSTS_PER_RUN
+        )
         .execute()
     )
 
@@ -452,8 +508,7 @@ def mark_posted(
         .update({
             "facebook_posted": True,
             "facebook_post_id": post_id,
-            "facebook_posted_at":
-                "now()",
+            "facebook_posted_at": "now()",
             "facebook_error": None
         })
         .eq(
@@ -478,7 +533,7 @@ def save_error(
         .table("news")
         .update({
             "facebook_error":
-                str(error)
+            str(error)
         })
         .eq(
             "id",
@@ -520,7 +575,7 @@ def main():
 
         try:
 
-            # 1. Create photo card
+            # 1. Create card
             card = create_photo_card(
                 image_url,
                 title,
@@ -533,7 +588,7 @@ def main():
                     "Could not create photo card"
                 )
 
-            # 2. Post to Facebook
+            # 2. Facebook post
             result = post_to_facebook(
                 card,
                 title,
@@ -541,7 +596,6 @@ def main():
                 article_url
             )
 
-            # Facebook returns post/photo ID
             post_id = (
                 result.get("post_id")
                 or result.get("id")
