@@ -37,10 +37,10 @@ META_GRAPH_VERSION = os.getenv(
 # =========================================================
 
 # TEST WITH 1 FIRST
-MAX_POSTS_PER_RUN = 1
+# MAX_POSTS_PER_RUN = 1
 
 # After successful test:
-# MAX_POSTS_PER_RUN = 3
+MAX_POSTS_PER_RUN = 3
 
 CARD_WIDTH = 1200
 CARD_HEIGHT = 1200
