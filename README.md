@@ -1,18 +1,18 @@
-\# **Automated Bengali News Scraper & Facebook Publisher**
+# **Automated Bengali News Scraper & Facebook Publisher**
 
 A lightweight Python automation system that collects recent news from multiple Bangladeshi newspaper websites, stores the article metadata in Supabase PostgreSQL, and automatically publishes selected articles to a Facebook Page.
 
-The scheduled pipeline runs through \*\***GitHub Actions**\*\*, so a personal PC does not need to stay turned on.
+The scheduled pipeline runs through **GitHub Actions**, so a personal PC does not need to stay turned on.
 
-\> \*\***Important content policy / copyright note:**\*\* this project is designed around article metadata and links. It does not republish full copyrighted article bodies. The Facebook post uses the article title, the source attribution, the original article photo as a styled card, and a link back to the source article. Make sure your use of source images/content is permitted by the relevant publisher's terms or by your own redistribution rights.
+> **Important content policy / copyright note:** this project is designed around article metadata and links. It does not republish full copyrighted article bodies. The Facebook post uses the article title, the source attribution, the original article photo as a styled card, and a link back to the source article. Make sure your use of source images/content is permitted by the relevant publisher's terms or by your own redistribution rights.
 
-\---
+---
 
-\## **1. What this project does**
+## **1. What this project does**
 
 The complete flow is:
 
-\`\`\`text
+```text
 
 News Websites
 
@@ -30,7 +30,7 @@ Supabase PostgreSQL
 
      ↓
 
-facebook\_poster.py
+facebook_poster.py
 
      ↓
 
@@ -44,64 +44,59 @@ Pillow creates modern photo-card
 
 Facebook Page
 
-\`\`\`
+```
 
 Current Facebook sources:
 
-\- bdnews24
+- bdnews24
 
-\- Prothom Alo
+- Prothom Alo
 
-\- The Business Standard (TBS)
+- The Business Standard (TBS)
 
-\- The Daily Star is intentionally \*\***excluded from Facebook posting**\*\*
+- Daily Amar Desh
 
-<<<<<<< HEAD
-The Daily Star is still allowed to exist in the news database if the scraper collects it, but \`facebook\_poster.py\` ignores rows whose source is exactly \`The Daily Star\`.
-=======
-<img 
-  width="1536" 
-  height="1024" 
-  alt="System Architecture" 
-  src="https://github.com/user-attachments/assets/b6a6e6bf-7ed7-4ac9-b3f3-df150e9722c6"
-/>
->>>>>>> a4aae5e9ec3e2c6dd480f903426f6cea047cb64e
+- The Daily Star is intentionally **excluded from Facebook posting**
 
-\---
 
-\## **2. Architecture**
+The Daily Star is still allowed to exist in the news database if the scraper collects it, but `facebook_poster.py` ignores rows whose source is exactly `The Daily Star`.
 
-![System Architecture]\(architecture.png)
 
-\### **Main components**
+---
 
-\| Component | Purpose |
+## **2. Architecture**
 
-\|---|---|
+![System Architecture](architecture.png)
 
-\| Newspaper websites | Original source of news |
+### **Main components**
 
-\| \`scraper.py\` | Finds recent articles and extracts metadata |
+| Component | Purpose |
 
-\| Supabase | Stores articles and Facebook posting status |
+|---|---|
 
-\| \`facebook\_poster.py\` | Selects unposted news and publishes cards |
+| Newspaper websites | Original source of news |
 
-\| Pillow | Creates the modern photo-card |
+| `scraper.py` | Finds recent articles and extracts metadata |
 
-\| GitHub Actions | Runs the automation on a schedule |
+| Supabase | Stores articles and Facebook posting status |
 
-\| Facebook Graph API | Publishes the final photo post |
+| `facebook_poster.py` | Selects unposted news and publishes cards |
 
-\| Supabase scheduled function | Deletes news older than 1 day |
+| Pillow | Creates the modern photo-card |
 
-\---
+| GitHub Actions | Runs the automation on a schedule |
 
-\## **3. Project structure**
+| Facebook Graph API | Publishes the final photo post |
+
+| Supabase scheduled function | Deletes news older than 1 day |
+
+---
+
+## **3. Project structure**
 
 Recommended structure:
 
-\`\`\`text
+```text
 
 NEWS PAPER SCRAP/
 
@@ -111,7 +106,7 @@ NEWS PAPER SCRAP/
 
 ├── database.py
 
-├── facebook\_poster.py
+├── facebook_poster.py
 
 ├── requirements.txt
 
@@ -129,69 +124,69 @@ NEWS PAPER SCRAP/
 
 └── README.md
 
-\`\`\`
+```
 
-No \`fonts/\` folder is required if the GitHub Actions workflow installs the Noto font package.
+No `fonts/` folder is required if the GitHub Actions workflow installs the Noto font package.
 
-\---
+---
 
-\# **4. How the automation works**
+# **4. How the automation works**
 
-\## **Step 1 — GitHub Actions starts**
+## **Step 1 — GitHub Actions starts**
 
 The workflow is configured with:
 
-\`\`\`yaml
+```yaml
 
 on:
 
   schedule:
 
-    - cron: "\*/5 \* \* \* \*"
+    - cron: "*/5 * * * *"
 
-  workflow\_dispatch:
+  workflow_dispatch:
 
-\`\`\`
+```
 
 This means:
 
-\- scheduled execution approximately every 5 minutes
+- scheduled execution approximately every 5 minutes
 
-\- manual execution is also available from GitHub Actions
+- manual execution is also available from GitHub Actions
 
 GitHub scheduled workflows use cron syntax and scheduled runs use the default branch. GitHub's documentation currently states that the shortest supported schedule interval is 5 minutes. citeturn0search1turn0search4
 
-\---
+---
 
-\## **Step 2 — GitHub creates a temporary runner**
+## **Step 2 — GitHub creates a temporary runner**
 
 GitHub Actions starts an Ubuntu virtual machine for the workflow.
 
 The runner:
 
-1\. checks out the repository
+1. checks out the repository
 
-2\. installs Python
+2. installs Python
 
-3\. installs Linux fonts
+3. installs Linux fonts
 
-4\. installs Python dependencies
+4. installs Python dependencies
 
-5\. runs \`scraper.py\`
+5. runs `scraper.py`
 
-6\. runs \`facebook\_poster.py\`
+6. runs `facebook_poster.py`
 
 The runner is temporary; the project does not require your Windows PC to remain on.
 
-\---
+---
 
-\# **5. News scraping**
+# **5. News scraping**
 
-\`scraper.py\` collects article information.
+`scraper.py` collects article information.
 
 For each article, the database stores fields such as:
 
-\`\`\`text
+```text
 
 id
 
@@ -205,41 +200,41 @@ image
 
 url
 
-published\_at
+published_at
 
-created\_at
+created_at
 
-\`\`\`
+```
 
 The scraper is designed to:
 
-\- inspect the configured newspaper pages
+- inspect the configured newspaper pages
 
-\- find probable article URLs
+- find probable article URLs
 
-\- extract article titles
+- extract article titles
 
-\- extract article dates
+- extract article dates
 
-\- extract article images
+- extract article images
 
-\- ignore articles outside the configured recent-news window
+- ignore articles outside the configured recent-news window
 
-\- save new URLs only
+- save new URLs only
 
 The article URL is unique in Supabase, so the same URL is not inserted repeatedly.
 
-\---
+---
 
-\# **6. Supabase database**
+# **6. Supabase database**
 
 The project uses Supabase PostgreSQL.
 
 Supabase provides a full PostgreSQL database and supports access through its dashboard, SQL editor, APIs, and client libraries. citeturn0search0turn0search3
 
-\## **Main table**
+## **Main table**
 
-\`\`\`sql
+```sql
 
 create table news (
 
@@ -255,133 +250,127 @@ create table news (
 
     url text unique not null,
 
-    published\_at timestamptz,
+    published_at timestamptz,
 
-    created\_at timestamptz default now()
+    created_at timestamptz default now()
 
 );
 
-\`\`\`
+```
 
 Indexes:
 
-\`\`\`sql
+```sql
 
-create index idx\_news\_published
+create index idx_news_published
 
-on news(published\_at desc);
+on news(published_at desc);
 
-create index idx\_news\_source
+create index idx_news_source
 
 on news(source);
 
-\`\`\`
+```
 
-\---
+---
 
-\# **7. Facebook tracking columns**
+# **7. Facebook tracking columns**
 
 The database also contains:
 
-\`\`\`sql
+```sql
 
 ALTER TABLE news
 
-ADD COLUMN IF NOT EXISTS facebook\_posted BOOLEAN DEFAULT FALSE;
+ADD COLUMN IF NOT EXISTS facebook_posted BOOLEAN DEFAULT FALSE;
 
 ALTER TABLE news
 
-ADD COLUMN IF NOT EXISTS facebook\_post\_id TEXT;
+ADD COLUMN IF NOT EXISTS facebook_post_id TEXT;
 
 ALTER TABLE news
 
-ADD COLUMN IF NOT EXISTS facebook\_posted\_at TIMESTAMPTZ;
+ADD COLUMN IF NOT EXISTS facebook_posted_at TIMESTAMPTZ;
 
 ALTER TABLE news
 
-ADD COLUMN IF NOT EXISTS facebook\_error TEXT;
+ADD COLUMN IF NOT EXISTS facebook_error TEXT;
 
-CREATE INDEX IF NOT EXISTS idx\_news\_facebook\_posted
+CREATE INDEX IF NOT EXISTS idx_news_facebook_posted
 
-ON news(facebook\_posted);
+ON news(facebook_posted);
 
-\`\`\`
+```
 
-\### **Meaning**
+### **Meaning**
 
-\### \`**facebook\_posted**\`
+### `facebook_posted`
 
-\`\`\`text
+```text
 
 FALSE
 
-\`\`\`
+```
 
 means the article has not successfully been posted.
 
-\`\`\`text
+```text
 
 TRUE
 
-\`\`\`
+```
 
 means the Facebook post was successful.
 
-\### \`**facebook\_post\_id**\`
+### `facebook_post_id`
 
 Stores the Facebook post ID returned by the API.
 
-\### \`**facebook\_posted\_at**\`
+### `facebook_posted_at`
 
 Stores the successful posting time.
 
-\### \`**facebook\_error**\`
+### `facebook_error`
 
 Stores the most recent Facebook/card/image error.
 
 This makes the system able to retry failed articles later instead of permanently losing them.
 
-\---
+---
 
-<<<<<<< HEAD
-\# **8. One-day automatic deletion**
-=======
-# 8. One-day automatic deletion
->>>>>>> a4aae5e9ec3e2c6dd480f903426f6cea047cb64e
+
+# **8. One-day automatic deletion**
+
 
 The project intentionally keeps recent news only.
 
 Database function:
 
-\`\`\`sql
+```sql
 
-create or replace function delete\_old\_news()
+create or replace function delete_old_news()
 
 returns void
 
 language sql
 
 as $$
-<<<<<<< HEAD
+
 
     delete from news
 
-    where published\_at is not null
+    where published_at is not null
 
-      and published\_at < now() - interval '1 day';
+      and published_at < now() - interval '1 day';
 
-=======
-    delete from news
-    where published_at is not null
-      and published_at < now() - interval '1 day';
->>>>>>> a4aae5e9ec3e2c6dd480f903426f6cea047cb64e
+
 $$;
 
-\`\`\`
+```
 
 Then schedule:
 
-\`\`\`text
+```text
 
 Job name:
 
@@ -389,50 +378,51 @@ delete-old-news
 
 Schedule:
 
-0 \* \* \* \*
+0 * * * *
 
 Command:
 
-<<<<<<< HEAD
-select delete\_old\_news();
-=======
+select delete_old_news();
+
+Command:
+
+
+select delete_old_news();
+
+
+```
+
 This checks every hour and deletes rows whose `published_at` is older than 1 day.
->>>>>>> a4aae5e9ec3e2c6dd480f903426f6cea047cb64e
 
-\`\`\`
+It does **not** care whether:
 
-This checks every hour and deletes rows whose \`published\_at\` is older than 1 day.
+```text
 
-It does \*\***not**\*\* care whether:
+facebook_posted = TRUE
 
-\`\`\`text
-
-facebook\_posted = TRUE
-
-\`\`\`
+```
 
 or
 
-\`\`\`text
+```text
 
-<<<<<<< HEAD
-facebook\_posted = FALSE
 
-\`\`\`
+facebook_posted = FALSE
 
-=======
->>>>>>> a4aae5e9ec3e2c6dd480f903426f6cea047cb64e
+```
+
+
 If the news is older than 1 day, it is deleted.
 
 Supabase supports database functions through its SQL editor, and PostgreSQL functions can perform database-side logic such as this cleanup. citeturn0search14
 
-\---
+---
 
-\# **9. Facebook publishing logic**
+# **9. Facebook publishing logic**
 
-\`facebook\_poster.py\` performs the following sequence:
+`facebook_poster.py` performs the following sequence:
 
-\`\`\`text
+```text
 
 Get latest unposted news
 
@@ -470,17 +460,17 @@ Save Facebook post ID
 
         ↓
 
-Set facebook\_posted = TRUE
+Set facebook_posted = TRUE
 
-\`\`\`
+```
 
-\---
+---
 
-\# **10. The Daily Star is skipped**
+# **10. The Daily Star is skipped**
 
 The Facebook query contains:
 
-\`\`\`python
+```python
 
 .neq(
 
@@ -490,19 +480,19 @@ The Facebook query contains:
 
 )
 
-\`\`\`
+```
 
 Therefore:
 
-\`\`\`text
+```text
 
 The Daily Star → ❌ Facebook
 
-\`\`\`
+```
 
 while:
 
-\`\`\`text
+```text
 
 bdnews24 → ✅
 
@@ -510,19 +500,19 @@ Prothom Alo → ✅
 
 The Business Standard → ✅
 
-\`\`\`
+```
 
 This also means a Daily Star article does not consume one of the available Facebook posting slots.
 
-\---
+---
 
-\# **11. Real article photo handling**
+# **11. Real article photo handling**
 
 This is an important part of the system.
 
 Sometimes a newspaper's scraper can return something like:
 
-\`\`\`text
+```text
 
 banner.png
 
@@ -532,7 +522,7 @@ ds-logo-share.jpeg
 
 default.jpg
 
-\`\`\`
+```
 
 instead of the actual article photo.
 
@@ -540,7 +530,7 @@ The Facebook poster therefore checks the stored image URL.
 
 Generic image names include patterns such as:
 
-\`\`\`text
+```text
 
 banner
 
@@ -560,33 +550,33 @@ avatar
 
 icon
 
-\`\`\`
+```
 
 If the stored image looks generic, the program opens the actual article page and searches for:
 
-\`\`\`text
+```text
 
-og\:image
+og:image
 
-twitter\:image
+twitter:image
 
 JSON-LD image
 
-\`\`\`
+```
 
 The best usable article image is then downloaded.
 
-\---
+---
 
-\# **12. TBS example**
+# **12. TBS example**
 
 Suppose the scraper stores:
 
-\`\`\`text
+```text
 
-https\://tbsnews.net/sites/all/themes/sloth/banner.png
+https://tbsnews.net/sites/all/themes/sloth/banner.png
 
-\`\`\`
+```
 
 The publisher page is opened.
 
@@ -594,33 +584,33 @@ The program searches the article HTML for the actual article image.
 
 Instead of posting:
 
-\`\`\`text
+```text
 
 banner.png
 
-\`\`\`
+```
 
 it attempts to use:
 
-\`\`\`text
+```text
 
 actual article photo
 
-\`\`\`
+```
 
 This prevents a site-wide banner/logo from becoming the Facebook image.
 
-\---
+---
 
-\# **13. Original photo-card design**
+# **13. Original photo-card design**
 
-The system does \*\***not generate an artificial news image**\*\*.
+The system does **not generate an artificial news image**.
 
 The original article photo is used as the background.
 
 Pillow then adds a lightweight UI layer:
 
-\`\`\`text
+```text
 
 Original article photo
 
@@ -640,25 +630,25 @@ exact article title
 
 modern photo-card
 
-\`\`\`
+```
 
 Target output:
 
-\`\`\`text
+```text
 
 1200 × 1200 JPEG
 
-\`\`\`
+```
 
 The original photograph remains the visual base.
 
-\---
+---
 
-\# **14. Photo-card layout**
+# **14. Photo-card layout**
 
 Conceptually:
 
-\`\`\`text
+```text
 
 ┌──────────────────────────────────┐
 
@@ -692,144 +682,144 @@ Conceptually:
 
 └──────────────────────────────────┘
 
-\`\`\`
+```
 
 The card does not add fake news facts.
 
-\---
+---
 
-\# **15. Bengali + English titles**
+# **15. Bengali + English titles**
 
 The workflow installs Noto fonts:
 
-\`\`\`yaml
+```yaml
 
 sudo apt-get update
 
 sudo apt-get install -y fonts-noto-core
 
-\`\`\`
+```
 
-\`facebook\_poster.py\` searches the Ubuntu font directories for Bengali-capable Noto fonts.
+`facebook_poster.py` searches the Ubuntu font directories for Bengali-capable Noto fonts.
 
 This allows titles containing both:
 
-\`\`\`text
+```text
 
 বাংলা
 
-\`\`\`
+```
 
 and:
 
-\`\`\`text
+```text
 
 English
 
-\`\`\`
+```
 
 to be rendered by the card generator.
 
-\---
+---
 
-\# **16. Facebook caption**
+# **16. Facebook caption**
 
 The Facebook caption is intentionally minimal.
 
 The program sends:
 
-\`\`\`text
+```text
 
 EXACT ARTICLE TITLE
 
 ARTICLE URL
 
-\`\`\`
+```
 
 Example:
 
-\`\`\`text
+```text
 
 Nine days after disaster, two pulled alive from Nepal hydropower tunnel
 
-https\://tbsnews.net/...
+https://tbsnews.net/...
 
-\`\`\`
+```
 
 There is:
 
-\- no generated description
+- no generated description
 
-\- no full article
+- no full article
 
-\- no first comment
+- no first comment
 
-\- no \`NEWS UPDATE\`
+- no `NEWS UPDATE`
 
-\- no \`বিস্তারিত পড়ুন:\` text
+- no `বিস্তারিত পড়ুন:` text
 
-\- no extra source paragraph
+- no extra source paragraph
 
 The source is already displayed on the photo-card itself.
 
-\---
+---
 
-\# **17. Why the article title appears twice**
+# **17. Why the article title appears twice**
 
 There are two different places:
 
-\### **Inside the photo-card**
+### **Inside the photo-card**
 
 The title is rendered directly onto the original article image.
 
-\### **Facebook caption**
+### **Facebook caption**
 
 The exact article title is also included as the caption text, followed by the source URL.
 
 This makes the post readable even if someone does not inspect the image carefully.
 
-\---
+---
 
-\# **18. Facebook API**
+# **18. Facebook API**
 
 The program posts the generated JPEG to:
 
-\`\`\`text
+```text
 
-/{PAGE\_ID}/photos
+/{PAGE_ID}/photos
 
-\`\`\`
+```
 
 with:
 
-\`\`\`text
+```text
 
 caption
 
 source
 
-access\_token
+access_token
 
-\`\`\`
+```
 
 The Page access token is stored as a GitHub Secret.
 
 It is never hard-coded in the repository.
 
-\---
+---
 
-\# **19. Facebook Page**
+# **19. Facebook Page**
 
 All automatic Facebook posts are published to this Facebook Page:
 
-> **Facebook Page:** [FACEBOOK PAGE](https://www.facebook.com/profile.php?id=61593758413778)
-
-Replace the placeholder URL above with the actual public URL of the Facebook Page where the automated posts are published.
+> **Facebook Page:** [Facebook Page](https://www.facebook.com/profile.php?id=61593758413778)
 
 Example:
 
 ```text
+
 https://www.facebook.com/your-page-username
+
 ```
 
 The public Facebook Page URL is only for documentation and navigation. It is **not a secret** and does not replace the Page ID or Page Access Token used by the Facebook Graph API.
@@ -837,8 +827,11 @@ The public Facebook Page URL is only for documentation and navigation. It is **n
 The automation uses:
 
 ```text
+
 FACEBOOK_PAGE_ID
+
 FACEBOOK_PAGE_ACCESS_TOKEN
+
 ```
 
 to publish to that Page.
@@ -851,7 +844,7 @@ to publish to that Page.
 
 Go to:
 
-\`\`\`text
+```text
 
 GitHub
 
@@ -863,57 +856,57 @@ GitHub
 
 → Actions
 
-\`\`\`
+```
 
 Create:
 
-\`\`\`text
+```text
 
-SUPABASE\_URL
+SUPABASE_URL
 
-SUPABASE\_KEY
+SUPABASE_KEY
 
-FACEBOOK\_PAGE\_ID
+FACEBOOK_PAGE_ID
 
-FACEBOOK\_PAGE\_ACCESS\_TOKEN
+FACEBOOK_PAGE_ACCESS_TOKEN
 
-\`\`\`
+```
 
 The workflow passes them to Python through environment variables.
 
 Never put these values directly inside:
 
-\`\`\`text
+```text
 
 scraper.py
 
 database.py
 
-facebook\_poster.py
+facebook_poster.py
 
-\`\`\`
+```
 
 and never commit:
 
-\`\`\`text
+```text
 
 .env
 
-\`\`\`
+```
 
-\---
+---
 
-\# **20.** \`**.gitignore**\`
+# **21. `.gitignore`**
 
 Use:
 
-\`\`\`gitignore
+```gitignore
 
 .env
 
-\_\_pycache\_\_/
+__pycache__/
 
-\*.pyc
+*.pyc
 
 news.db
 
@@ -921,15 +914,15 @@ news.db
 
 venv/
 
-\`\`\`
+```
 
-\---
+---
 
-\# **21.** \`**requirements.txt**\`
+# **22. `requirements.txt`**
 
 Use:
 
-\`\`\`text
+```text
 
 fastapi
 
@@ -945,15 +938,15 @@ python-dotenv
 
 Pillow
 
-\`\`\`
+```
 
-\---
+---
 
-\# **22. GitHub Actions workflow**
+# **23. GitHub Actions workflow**
 
 Recommended workflow:
 
-\`\`\`yaml
+```yaml
 
 name: Automatic News Scraper and Facebook Poster
 
@@ -961,9 +954,9 @@ on:
 
   schedule:
 
-    - cron: "\*/5 \* \* \* \*"
+    - cron: "*/5 * * * *"
 
-  workflow\_dispatch:
+  workflow_dispatch:
 
 jobs:
 
@@ -975,11 +968,11 @@ jobs:
 
       - name: Checkout repository
 
-        uses: actions/checkout\@v4
+        uses: actions/checkout@v4
 
       - name: Setup Python
 
-        uses: actions/setup-python\@v5
+        uses: actions/setup-python@v5
 
         with:
 
@@ -1001,9 +994,9 @@ jobs:
 
         env:
 
-          SUPABASE\_URL: ${{ secrets.SUPABASE\_URL }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
 
-          SUPABASE\_KEY: ${{ secrets.SUPABASE\_KEY }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
 
         run: |
 
@@ -1013,55 +1006,55 @@ jobs:
 
         env:
 
-          SUPABASE\_URL: ${{ secrets.SUPABASE\_URL }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
 
-          SUPABASE\_KEY: ${{ secrets.SUPABASE\_KEY }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
 
-          FACEBOOK\_PAGE\_ID: ${{ secrets.FACEBOOK\_PAGE\_ID }}
+          FACEBOOK_PAGE_ID: ${{ secrets.FACEBOOK_PAGE_ID }}
 
-          FACEBOOK\_PAGE\_ACCESS\_TOKEN: ${{ secrets.FACEBOOK\_PAGE\_ACCESS\_TOKEN }}
+          FACEBOOK_PAGE_ACCESS_TOKEN: ${{ secrets.FACEBOOK_PAGE_ACCESS_TOKEN }}
 
-          META\_GRAPH\_VERSION: "v25.0"
+          META_GRAPH_VERSION: "v25.0"
 
         run: |
 
-          python facebook\_poster.py
+          python facebook_poster.py
 
-\`\`\`
+```
 
-\---
+---
 
-\# **23. Posting limit**
+# **24. Posting limit**
 
-Inside \`facebook\_poster.py\`:
+Inside `facebook_poster.py`:
 
-\`\`\`python
+```python
 
-MAX\_POSTS\_PER\_RUN = 1
+MAX_POSTS_PER_RUN = 1
 
-\`\`\`
+```
 
 is recommended for the first test.
 
 After successful testing:
 
-\`\`\`python
+```python
 
-MAX\_POSTS\_PER\_RUN = 3
+MAX_POSTS_PER_RUN = 3
 
-\`\`\`
+```
 
 Then each workflow run can publish up to 3 eligible articles.
 
 The system does not intentionally publish The Daily Star.
 
-\---
+---
 
-\# **24. What happens during a normal run**
+# **25. What happens during a normal run**
 
 Example:
 
-\`\`\`text
+```text
 
 GitHub Actions starts
 
@@ -1071,7 +1064,7 @@ scraper.py
 
         ↓
 
-4 newspaper websites checked
+5 newspaper websites checked
 
         ↓
 
@@ -1079,7 +1072,7 @@ new articles saved to Supabase
 
         ↓
 
-facebook\_poster.py
+facebook_poster.py
 
         ↓
 
@@ -1109,19 +1102,19 @@ Facebook returns post ID
 
 Supabase:
 
-facebook\_posted = TRUE
+facebook_posted = TRUE
 
-\`\`\`
+```
 
-\---
+---
 
-\# **25. What happens if image download fails**
+# **26. What happens if image download fails**
 
-The current design intentionally does \*\***not**\*\* create a fake image.
+The current design intentionally does **not** create a fake image.
 
 If the real article image cannot be obtained:
 
-\`\`\`text
+```text
 
 Image unavailable
 
@@ -1135,23 +1128,23 @@ Facebook post is NOT created
 
         ↓
 
-facebook\_error is saved
+facebook_error is saved
 
         ↓
 
-facebook\_posted remains FALSE
+facebook_posted remains FALSE
 
-\`\`\`
+```
 
 This is intentional because the project requirement is to use the real article photo.
 
-\---
+---
 
-\# **26. What happens if Facebook fails**
+# **27. What happens if Facebook fails**
 
 Example:
 
-\`\`\`text
+```text
 
 Card created
 
@@ -1161,43 +1154,43 @@ Facebook API error
 
      ↓
 
-facebook\_posted remains FALSE
+facebook_posted remains FALSE
 
      ↓
 
-facebook\_error = error message
+facebook_error = error message
 
-\`\`\`
+```
 
 The article therefore remains eligible for a later retry.
 
-\---
+---
 
-\# **27. What happens if the same article is encountered again**
+# **28. What happens if the same article is encountered again**
 
 The article URL is unique:
 
-\`\`\`sql
+```sql
 
 url text unique not null
 
-\`\`\`
+```
 
 So the scraper does not create duplicate database rows for the same article URL.
 
 Facebook additionally checks:
 
-\`\`\`python
+```python
 
-facebook\_posted = False
+facebook_posted = False
 
-\`\`\`
+```
 
 before selecting articles.
 
 Therefore:
 
-\`\`\`text
+```text
 
 same URL
 
@@ -1217,15 +1210,15 @@ TRUE
 
 not posted again
 
-\`\`\`
+```
 
-\---
+---
 
-\# **28. Manual testing**
+# **29. Manual testing**
 
 After pushing code:
 
-\`\`\`text
+```text
 
 GitHub
 
@@ -1235,19 +1228,19 @@ GitHub
 
 → Run workflow
 
-\`\`\`
+```
 
 For the first test:
 
-\`\`\`python
+```python
 
-MAX\_POSTS\_PER\_RUN = 1
+MAX_POSTS_PER_RUN = 1
 
-\`\`\`
+```
 
 Expected log:
 
-\`\`\`text
+```text
 
 Starting Facebook poster...
 
@@ -1267,137 +1260,137 @@ Posting photo card to Facebook...
 
 Facebook Post ID: ...
 
-✓ Supabase: facebook\_posted = TRUE
+✓ Supabase: facebook_posted = TRUE
 
 Finished. Posted: 1
 
-\`\`\`
+```
 
-\---
+---
 
-\# **29. Troubleshooting**
+# **30. Troubleshooting**
 
-\## **Problem:** \`**Found 0 news**\`
+## **Problem:** `Found 0 news`
 
 Check Supabase.
 
 Possible reasons:
 
-\- all eligible articles already have \`facebook\_posted = TRUE\`
+- all eligible articles already have `facebook_posted = TRUE`
 
-\- only The Daily Star articles are available
+- only The Daily Star articles are available
 
-\- no recent news exists
+- no recent news exists
 
-\- \`image\` is NULL
+- `image` is NULL
 
-\---
+---
 
-\## **Problem:** \`**Image download failed**\`
+## **Problem:** `Image download failed`
 
 Check the image URL.
 
 The publisher's image server may:
 
-\- block automated requests
+- block automated requests
 
-\- be temporarily unavailable
+- be temporarily unavailable
 
-\- have a DNS problem
+- have a DNS problem
 
-\- return a non-image response
+- return a non-image response
 
 The program will not invent an image.
 
-\---
+---
 
-\## **Problem:** \`**banner.png**\` **appears**
+## **Problem:** `banner.png` **appears**
 
 The article page's actual image metadata was not successfully found.
 
 Check:
 
-\`\`\`text
+```text
 
-og\:image
+og:image
 
-twitter\:image
+twitter:image
 
 JSON-LD
 
-\`\`\`
+```
 
 in the article HTML.
 
-\---
+---
 
-\## **Problem: Bengali text appears as boxes**
+## **Problem: Bengali text appears as boxes**
 
 Make sure the workflow contains:
 
-\`\`\`yaml
+```yaml
 
 sudo apt-get install -y fonts-noto-core
 
-\`\`\`
+```
 
-and that \`Pillow\` is installed.
+and that `Pillow` is installed.
 
-\---
+---
 
-\## **Problem: Facebook API error**
+## **Problem: Facebook API error**
 
 Check:
 
-\`\`\`text
+```text
 
-FACEBOOK\_PAGE\_ID
+FACEBOOK_PAGE_ID
 
-FACEBOOK\_PAGE\_ACCESS\_TOKEN
+FACEBOOK_PAGE_ACCESS_TOKEN
 
-META\_GRAPH\_VERSION
+META_GRAPH_VERSION
 
-\`\`\`
+```
 
 Also check whether the Page access token is still valid and whether Meta is temporarily limiting posting.
 
-\---
+---
 
-\## **Problem: Post succeeds but database is not updated**
+## **Problem: Post succeeds but database is not updated**
 
 Check:
 
-\`\`\`text
+```text
 
-SUPABASE\_URL
+SUPABASE_URL
 
-SUPABASE\_KEY
+SUPABASE_KEY
 
-\`\`\`
+```
 
 and inspect the workflow log after the Facebook success line.
 
-\---
+---
 
-\# **30. Security**
+# **31. Security**
 
 Never commit:
 
-\`\`\`text
+```text
 
 .env
 
-\`\`\`
+```
 
 Never put:
 
-\`\`\`text
+```text
 
-FACEBOOK\_PAGE\_ACCESS\_TOKEN
+FACEBOOK_PAGE_ACCESS_TOKEN
 
-SUPABASE\_KEY
+SUPABASE_KEY
 
-\`\`\`
+```
 
 inside source code.
 
@@ -1405,73 +1398,73 @@ Use GitHub Actions Secrets.
 
 For local development:
 
-\`\`\`env
+```env
 
-SUPABASE\_URL=...
+SUPABASE_URL=...
 
-SUPABASE\_KEY=...
+SUPABASE_KEY=...
 
-FACEBOOK\_PAGE\_ID=...
+FACEBOOK_PAGE_ID=...
 
-FACEBOOK\_PAGE\_ACCESS\_TOKEN=...
+FACEBOOK_PAGE_ACCESS_TOKEN=...
 
-\`\`\`
+```
 
-Keep \`.env\` ignored by Git.
+Keep `.env` ignored by Git.
 
-\---
+---
 
-\# **31. Local development**
+# **32. Local development**
 
 Install dependencies:
 
-\`\`\`bash
+```bash
 
 pip install -r requirements.txt
 
-\`\`\`
+```
 
-Create \`.env\`:
+Create `.env`:
 
-\`\`\`env
+```env
 
-SUPABASE\_URL=your\_supabase\_url
+SUPABASE_URL=your_supabase_url
 
-SUPABASE\_KEY=your\_supabase\_key
+SUPABASE_KEY=your_supabase_key
 
-FACEBOOK\_PAGE\_ID=your\_page\_id
+FACEBOOK_PAGE_ID=your_page_id
 
-FACEBOOK\_PAGE\_ACCESS\_TOKEN=your\_page\_access\_token
+FACEBOOK_PAGE_ACCESS_TOKEN=your_page_access_token
 
-META\_GRAPH\_VERSION=v25.0
+META_GRAPH_VERSION=v25.0
 
-\`\`\`
+```
 
 Run scraper:
 
-\`\`\`bash
+```bash
 
 python scraper.py
 
-\`\`\`
+```
 
 Run Facebook poster:
 
-\`\`\`bash
+```bash
 
-python facebook\_poster.py
+python facebook_poster.py
 
-\`\`\`
+```
 
-\---
+---
 
-\# **32. Why GitHub Actions is used instead of a VPS**
+# **33. Why GitHub Actions is used instead of a VPS**
 
 For this project's current workload, the automation is lightweight.
 
 The workflow only needs to:
 
-\`\`\`text
+```text
 
 start
 
@@ -1485,21 +1478,21 @@ start
 
 → finish
 
-\`\`\`
+```
 
 There is no requirement for a continuously running server for the scheduled scraper/poster.
 
 GitHub Actions provides hosted runners that execute workflow jobs, so the local PC does not need to remain powered on. citeturn0search6turn0search9
 
-\---
+---
 
-\# **33. Role of Vercel**
+# **34. Role of Vercel**
 
 If the project also contains a Vercel/FastAPI frontend/API, its role is separate from the scheduled Facebook pipeline.
 
 Typical architecture:
 
-\`\`\`text
+```text
 
 GitHub Actions
 
@@ -1527,23 +1520,23 @@ GitHub Actions
 
           Frontend
 
-\`\`\`
+```
 
 So:
 
-\- \*\***GitHub Actions**\*\* = automation
+- **GitHub Actions** = automation
 
-\- \*\***Supabase**\*\* = database
+- **Supabase** = database
 
-\- \*\***Facebook Graph API**\*\* = publishing
+- **Facebook Graph API** = publishing
 
-\- \*\***Vercel**\*\* = web/API interface, if enabled
+- **Vercel** = web/API interface, if enabled
 
-\---
+---
 
-\# **34. Complete system summary**
+# **35. Complete system summary**
 
-\`\`\`text
+```text
 
                   ┌──────────────────────┐
 
@@ -1569,7 +1562,7 @@ So:
 
                   │   GITHUB ACTIONS     │
 
-                  │   Every \~5 minutes   │
+                  │   Every ~5 minutes   │
 
                   └──────────┬───────────┘
 
@@ -1605,7 +1598,7 @@ So:
 
           ┌──────────────────────┐
 
-          │ facebook\_poster.py   │
+          │ facebook_poster.py   │
 
           └──────────┬───────────┘
 
@@ -1617,7 +1610,7 @@ So:
 
           │ Real Image Resolver  │
 
-          │ og\:image / JSON-LD   │
+          │ og:image / JSON-LD   │
 
           └──────────┬───────────┘
 
@@ -1651,15 +1644,15 @@ So:
 
           └──────────────────────┘
 
-\`\`\`
+```
 
-\---
+---
 
-\# **35. Final expected result**
+# **36. Final expected result**
 
 For an eligible article:
 
-\`\`\`text
+```text
 
 ORIGINAL ARTICLE PHOTO
 
@@ -1675,41 +1668,43 @@ exact title
 
 source badge
 
-\`\`\`
+```
 
 Facebook caption:
 
-\`\`\`text
+```text
 
 Exact Article Title
 
-https\://source-article-url
+https://source-article-url
 
-\`\`\`
+```
 
 Database:
 
-\`\`\`text
+```text
 
-facebook\_posted = TRUE
+facebook_posted = TRUE
 
-facebook\_post\_id = ...
+facebook_post_id = ...
 
-facebook\_posted\_at = ...
+facebook_posted_at = ...
 
-facebook\_error = NULL
+facebook_error = NULL
 
-\`\`\`
+```
 
 Facebook destination:
 
 ```text
+
 FACEBOOK PAGE URL
+
 ```
 
 For The Daily Star:
 
-\`\`\`text
+```text
 
 The Daily Star
 
@@ -1717,11 +1712,11 @@ The Daily Star
 
 Facebook skipped
 
-\`\`\`
+```
 
 For an article older than 1 day:
 
-\`\`\`text
+```text
 
 Supabase cleanup
 
@@ -1729,80 +1724,80 @@ Supabase cleanup
 
 deleted
 
-\`\`\`
+```
 
-\---
+---
 
-\## **36. Maintenance checklist**
+## **37. Maintenance checklist**
 
 Occasionally check:
 
-\- GitHub Actions runs
+- GitHub Actions runs
 
-\- Facebook Page posts
+- Facebook Page posts
 
-\- Supabase \`news\` table
+- Supabase `news` table
 
-\- \`facebook\_error\`
+- `facebook_error`
 
-\- Facebook access token validity
+- Facebook access token validity
 
-\- newspaper HTML structure
+- newspaper HTML structure
 
-\- image extraction
+- image extraction
 
-\- GitHub Actions workflow
+- GitHub Actions workflow
 
 If a newspaper changes its website HTML structure, the scraper may need an update.
 
-\---
+---
 
-\## **37. Current project status**
+## **38. Current project status**
 
-\### **Implemented**
+### **Implemented**
 
-\- [x] Multi-source scraping
+- [x] Multi-source scraping
 
-\- [x] Supabase storage
+- [x] Supabase storage
 
-\- [x] Duplicate URL prevention
+- [x] Duplicate URL prevention
 
-\- [x] Recent-news filtering
+- [x] Recent-news filtering
 
-\- [x] 1-day database retention
+- [x] 1-day database retention
 
-\- [x] GitHub Actions scheduling
+- [x] GitHub Actions scheduling
 
-\- [x] Facebook Page publishing
+- [x] Facebook Page publishing
 
-\- [x] Facebook posted-state tracking
+- [x] Facebook posted-state tracking
 
-\- [x] Error tracking
+- [x] Error tracking
 
-\- [x] The Daily Star Facebook exclusion
+- [x] The Daily Star Facebook exclusion
 
-\- [x] Real article-image detection
+- [x] Real article-image detection
 
-\- [x] Banner/logo image rejection
+- [x] Banner/logo image rejection
 
-\- [x] Original-photo based card generation
+- [x] Original-photo based card generation
 
-\- [x] Bengali + English title support
+- [x] Bengali + English title support
 
-\- [x] Minimal Facebook caption
+- [x] Minimal Facebook caption
 
-\- [x] Article URL in caption
+- [x] Article URL in caption
 
-\- [x] No first-comment link
+- [x] No first-comment link
 
-\- [x] Maximum-post limit per workflow run
+- [x] Maximum-post limit per workflow run
 
-\### **Recommended final setting**
+### **Recommended final setting**
 
 After successful testing:
 
-\`\`\`python
+```python
 
-MAX\_POSTS\_PER\_RUN = 3
+MAX_POSTS_PER_RUN = 3
 
-\`\`\`
+```
