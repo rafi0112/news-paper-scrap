@@ -1,4 +1,4 @@
-import os
+
 import io
 import json
 import subprocess
@@ -1390,17 +1390,18 @@ def create_photo_card(
     published_at=None
 ):
     """
-    Builds a clean "news card" for Facebook:
+    Premium editorial-style Facebook photo card.
 
-      white header with a bold black headline
-      (leading portion highlighted in red, white text)
-              +
-      small gray SOURCE | DATE line
-              +
-      the original article photo, uncropped of any filters,
-      with a small brand mark in the bottom-right corner
+    Layout:
+      - clean warm-white editorial header
+      - subtle red premium accent
+      - small source/date metadata
+      - original article photo, edge-to-edge
+      - dark cinematic photo treatment near the bottom
+      - elegant TN brand mark
+      - mixed Bengali + English typography
 
-    Returns a JPEG in a BytesIO buffer, or None on failure.
+    The actual article image is kept as the visual foundation.
     """
 
     try:
@@ -1410,38 +1411,62 @@ def create_photo_card(
         # ----------------------------------------------------
 
         headline_bengali_font = get_font(
-            HEADLINE_FONT_SIZE, bold=True, bengali=True
+            HEADLINE_FONT_SIZE,
+            bold=True,
+            bengali=True
         )
 
         headline_latin_font = get_font(
-            HEADLINE_FONT_SIZE, bold=True, bengali=False
+            HEADLINE_FONT_SIZE,
+            bold=True,
+            bengali=False
         )
 
         source_bengali_font = get_font(
-            SOURCE_FONT_SIZE, bold=True, bengali=True
+            SOURCE_FONT_SIZE,
+            bold=True,
+            bengali=True
         )
 
         source_latin_font = get_font(
-            SOURCE_FONT_SIZE, bold=True, bengali=False
+            SOURCE_FONT_SIZE,
+            bold=True,
+            bengali=False
         )
 
-        logo_font = get_font(
-            40, bold=True, bengali=False
+        small_latin_font = get_font(
+            19,
+            bold=False,
+            bengali=False
+        )
+
+        brand_font = get_font(
+            32,
+            bold=True,
+            bengali=False
         )
 
         # ----------------------------------------------------
-        # Measuring canvas (used only to compute wrapping /
-        # text sizes before we know the final header height)
+        # Measurement canvas
         # ----------------------------------------------------
 
-        measure_img = Image.new("RGB", (CARD_WIDTH, 10), WHITE)
-        measure_draw = ImageDraw.Draw(measure_img)
+        measure_img = Image.new(
+            "RGB",
+            (CARD_WIDTH, 10),
+            WHITE
+        )
 
-        max_text_width = CARD_WIDTH - (2 * SIDE_MARGIN)
+        measure_draw = ImageDraw.Draw(
+            measure_img
+        )
+
+        max_text_width = (
+            CARD_WIDTH
+            - (2 * SIDE_MARGIN)
+        )
 
         # ----------------------------------------------------
-        # Wrap the headline into lines of words, then figure
-        # out how many of the total words get highlighted.
+        # Headline wrapping
         # ----------------------------------------------------
 
         line_word_lists = wrap_text_words(
@@ -1449,14 +1474,19 @@ def create_photo_card(
             title,
             headline_bengali_font,
             headline_latin_font,
-            max_text_width,
+            max_text_width
         )
 
         truncated = False
 
         if len(line_word_lists) > HEADLINE_MAX_LINES:
 
-            line_word_lists = line_word_lists[:HEADLINE_MAX_LINES]
+            line_word_lists = (
+                line_word_lists[
+                    :HEADLINE_MAX_LINES
+                ]
+            )
+
             truncated = True
 
         if truncated and line_word_lists:
@@ -1464,14 +1494,22 @@ def create_photo_card(
             last_line = line_word_lists[-1]
 
             if last_line:
-                last_line[-1] = last_line[-1] + "..."
+
+                last_line[-1] = (
+                    last_line[-1]
+                    + "..."
+                )
 
         total_words = sum(
-            len(words) for words in line_word_lists
+            len(words)
+            for words in line_word_lists
         )
 
-        highlight_count = build_highlight_flags(
-            total_words, HIGHLIGHT_WORD_RATIO
+        highlight_count = (
+            build_highlight_flags(
+                total_words,
+                HIGHLIGHT_WORD_RATIO
+            )
         )
 
         line_heights = [
@@ -1479,61 +1517,137 @@ def create_photo_card(
                 measure_draw,
                 " ".join(words),
                 headline_bengali_font,
-                headline_latin_font,
+                headline_latin_font
             )
             for words in line_word_lists
         ]
 
         headline_block_height = (
             sum(line_heights)
-            + HEADLINE_LINE_SPACING * (len(line_word_lists) - 1)
-        )
-
-        source_text = (source or "").strip().upper()
-
-        date_text = format_display_date(published_at)
-
-        source_line = f"SOURCE: {source_text} | DATE: {date_text}"
-
-        source_line_height = mixed_text_height(
-            measure_draw,
-            source_line,
-            source_bengali_font,
-            source_latin_font,
+            + HEADLINE_LINE_SPACING
+            * max(
+                0,
+                len(line_word_lists) - 1
+            )
         )
 
         # ----------------------------------------------------
-        # Compute total header height, then final card height
+        # Metadata
         # ----------------------------------------------------
+
+        source_text = (
+            (source or "")
+            .strip()
+            .upper()
+        )
+
+        date_text = format_display_date(
+            published_at
+        )
+
+        source_line = (
+            f"{source_text}  •  {date_text}"
+        )
+
+        source_line_height = (
+            mixed_text_height(
+                measure_draw,
+                source_line,
+                source_bengali_font,
+                source_latin_font
+            )
+        )
+
+        # ----------------------------------------------------
+        # Premium header sizing
+        # ----------------------------------------------------
+
+        accent_bar_height = 7
 
         header_height = (
             TOP_MARGIN
+            + 18
             + headline_block_height
             + GAP_AFTER_HEADLINE
             + source_line_height
             + GAP_AFTER_SOURCE
+            + 18
         )
 
-        card_height = header_height + PHOTO_SIZE
+        photo_height = PHOTO_SIZE
+
+        card_height = (
+            header_height
+            + photo_height
+        )
 
         # ----------------------------------------------------
-        # Build the actual card
+        # Premium white editorial canvas
         # ----------------------------------------------------
 
         card = Image.new(
-            "RGB", (CARD_WIDTH, int(card_height)), WHITE
+            "RGB",
+            (
+                CARD_WIDTH,
+                int(card_height)
+            ),
+            (250, 249, 247)
         )
 
         draw = ImageDraw.Draw(card)
 
         # ----------------------------------------------------
+        # Very subtle top accent
+        # ----------------------------------------------------
+
+        draw.rectangle(
+            (
+                0,
+                0,
+                CARD_WIDTH,
+                accent_bar_height
+            ),
+            fill=ACCENT_COLOR
+        )
+
+        # Small editorial label
+        label_font = get_font(
+            18,
+            bold=True,
+            bengali=False
+        )
+
+        label_text = "LATEST NEWS"
+
+        draw.text(
+            (
+                SIDE_MARGIN,
+                TOP_MARGIN
+            ),
+            label_text,
+            font=label_font,
+            fill=(
+                150,
+                150,
+                150
+            )
+        )
+
+        # ----------------------------------------------------
         # Headline
         # ----------------------------------------------------
 
-        y = TOP_MARGIN
+        y = (
+            TOP_MARGIN
+            + 34
+        )
+
         global_index = 0
 
-        for words, height in zip(line_word_lists, line_heights):
+        for words, height in zip(
+            line_word_lists,
+            line_heights
+        ):
 
             draw_headline_line(
                 draw,
@@ -1544,95 +1658,464 @@ def create_photo_card(
                 y,
                 height,
                 headline_bengali_font,
-                headline_latin_font,
+                headline_latin_font
             )
 
             global_index += len(words)
-            y += height + HEADLINE_LINE_SPACING
+
+            y += (
+                height
+                + HEADLINE_LINE_SPACING
+            )
 
         # ----------------------------------------------------
-        # Source / date line
+        # Thin editorial divider
         # ----------------------------------------------------
 
-        y += GAP_AFTER_HEADLINE - HEADLINE_LINE_SPACING
+        divider_y = (
+            y
+            + 2
+        )
+
+        draw.line(
+            (
+                SIDE_MARGIN,
+                divider_y,
+                CARD_WIDTH - SIDE_MARGIN,
+                divider_y
+            ),
+            fill=(
+                220,
+                220,
+                220
+            ),
+            width=2
+        )
+
+        # ----------------------------------------------------
+        # Source/date metadata
+        # ----------------------------------------------------
+
+        metadata_y = (
+            divider_y
+            + 22
+        )
 
         draw_mixed_text(
             draw,
-            (SIDE_MARGIN, y),
+            (
+                SIDE_MARGIN,
+                metadata_y
+            ),
             source_line,
             source_bengali_font,
             source_latin_font,
-            GRAY,
+            (
+                105,
+                105,
+                105
+            )
         )
 
         # ----------------------------------------------------
-        # Photo — plain, edge-to-edge, no filters
+        # Small red accent dot
         # ----------------------------------------------------
 
-        photo = crop_to_square(image)
+        dot_x = (
+            CARD_WIDTH
+            - SIDE_MARGIN
+            - 10
+        )
+
+        dot_y = (
+            metadata_y
+            + max(
+                10,
+                source_line_height // 2
+            )
+        )
+
+        draw.ellipse(
+            (
+                dot_x - 6,
+                dot_y - 6,
+                dot_x + 6,
+                dot_y + 6
+            ),
+            fill=ACCENT_COLOR
+        )
+
+        # ----------------------------------------------------
+        # Photo
+        # ----------------------------------------------------
+
+        photo = crop_to_square(
+            image
+        )
 
         photo = photo.resize(
-            (PHOTO_SIZE, PHOTO_SIZE),
-            Image.Resampling.LANCZOS,
+            (
+                PHOTO_SIZE,
+                PHOTO_SIZE
+            ),
+            Image.Resampling.LANCZOS
         )
 
-        photo_y = int(header_height)
-
-        card.paste(photo, (0, photo_y))
-
-        draw = ImageDraw.Draw(card)  # rebind after paste
-
-        # ----------------------------------------------------
-        # Brand mark — small badge, bottom-right of the photo
-        # ----------------------------------------------------
-
-        mark_text = BRAND_MARK
-
-        mark_width = draw.textbbox(
-            (0, 0), mark_text, font=logo_font
+        photo_y = int(
+            header_height
         )
-        mark_w = mark_width[2] - mark_width[0]
-        mark_h = mark_width[3] - mark_width[1]
 
-        mark_margin = 30
+        card.paste(
+            photo,
+            (
+                0,
+                photo_y
+            )
+        )
+
+        # ----------------------------------------------------
+        # Premium photo overlay
+        #
+        # The original image remains underneath.
+        # Only subtle gradients are added for readability.
+        # ----------------------------------------------------
+
+        overlay = Image.new(
+            "RGBA",
+            (
+                CARD_WIDTH,
+                PHOTO_SIZE
+            ),
+            (
+                0,
+                0,
+                0,
+                0
+            )
+        )
+
+        od = ImageDraw.Draw(
+            overlay
+        )
+
+        # Top soft vignette
+        for i in range(180):
+
+            alpha = int(
+                40
+                * (
+                    1
+                    - i / 180
+                )
+            )
+
+            od.line(
+                (
+                    0,
+                    i,
+                    CARD_WIDTH,
+                    i
+                ),
+                fill=(
+                    0,
+                    0,
+                    0,
+                    alpha
+                )
+            )
+
+        # Bottom cinematic gradient
+        gradient_start = 720
+
+        for y2 in range(
+            gradient_start,
+            PHOTO_SIZE
+        ):
+
+            progress = (
+                y2 - gradient_start
+            ) / (
+                PHOTO_SIZE
+                - gradient_start
+            )
+
+            alpha = int(
+                8
+                + 145 * progress
+            )
+
+            od.line(
+                (
+                    0,
+                    y2,
+                    CARD_WIDTH,
+                    y2
+                ),
+                fill=(
+                    0,
+                    0,
+                    0,
+                    alpha
+                )
+            )
+
+        card = Image.alpha_composite(
+            card.convert("RGBA"),
+            Image.new(
+                "RGBA",
+                (
+                    CARD_WIDTH,
+                    photo_y
+                ),
+                (
+                    0,
+                    0,
+                    0,
+                    0
+                )
+            )
+        )
+
+        # Re-create composite cleanly so the photo stays untouched.
+        base = Image.new(
+            "RGBA",
+            (
+                CARD_WIDTH,
+                int(card_height)
+            ),
+            (
+                250,
+                249,
+                247,
+                255
+            )
+        )
+
+        # Header from original card
+        header_crop = card.crop(
+            (
+                0,
+                0,
+                CARD_WIDTH,
+                photo_y
+            )
+        )
+
+        base.alpha_composite(
+            header_crop,
+            (
+                0,
+                0
+            )
+        )
+
+        # Original photo
+        base.paste(
+            photo.convert("RGBA"),
+            (
+                0,
+                photo_y
+            )
+        )
+
+        # Photo overlay
+        base.alpha_composite(
+            overlay,
+            (
+                0,
+                photo_y
+            )
+        )
+
+        draw = ImageDraw.Draw(
+            base
+        )
+
+        # ----------------------------------------------------
+        # Photo top hairline
+        # ----------------------------------------------------
+
+        draw.rectangle(
+            (
+                0,
+                photo_y,
+                CARD_WIDTH,
+                photo_y + 3
+            ),
+            fill=ACCENT_COLOR
+        )
+
+        # ----------------------------------------------------
+        # Premium bottom source mark
+        # ----------------------------------------------------
+
+        mark_text = (
+            BRAND_MARK
+            or "TN"
+        )
+
+        bbox = draw.textbbox(
+            (0, 0),
+            mark_text,
+            font=brand_font
+        )
+
+        mark_w = (
+            bbox[2]
+            - bbox[0]
+        )
+
+        mark_h = (
+            bbox[3]
+            - bbox[1]
+        )
+
+        mark_margin = 34
         mark_pad_x = 18
         mark_pad_y = 12
 
-        badge_x1 = CARD_WIDTH - mark_margin
-        badge_y1 = photo_y + PHOTO_SIZE - mark_margin
-        badge_x0 = badge_x1 - mark_w - (2 * mark_pad_x)
-        badge_y0 = badge_y1 - mark_h - (2 * mark_pad_y)
+        badge_x1 = (
+            CARD_WIDTH
+            - mark_margin
+        )
 
+        badge_y1 = (
+            photo_y
+            + PHOTO_SIZE
+            - mark_margin
+        )
+
+        badge_x0 = (
+            badge_x1
+            - mark_w
+            - 2 * mark_pad_x
+        )
+
+        badge_y0 = (
+            badge_y1
+            - mark_h
+            - 2 * mark_pad_y
+        )
+
+        # translucent premium badge
         draw.rounded_rectangle(
-            (badge_x0, badge_y0, badge_x1, badge_y1),
-            radius=10,
-            fill=(0, 0, 0, 140),
+            (
+                badge_x0,
+                badge_y0,
+                badge_x1,
+                badge_y1
+            ),
+            radius=14,
+            fill=(
+                0,
+                0,
+                0,
+                145
+            ),
+            outline=(
+                255,
+                255,
+                255,
+                90
+            ),
+            width=1
         )
 
         draw.text(
-            (badge_x0 + mark_pad_x, badge_y0 + mark_pad_y),
+            (
+                badge_x0
+                + mark_pad_x,
+                badge_y0
+                + mark_pad_y
+                - 2
+            ),
             mark_text,
-            font=logo_font,
-            fill=WHITE,
+            font=brand_font,
+            fill=WHITE
         )
 
         # ----------------------------------------------------
-        # EXPORT
+        # Tiny editorial line at bottom-left
+        # ----------------------------------------------------
+
+        tiny_text = "NEWS • BANGLADESH"
+
+        tiny_bbox = draw.textbbox(
+            (0, 0),
+            tiny_text,
+            font=small_latin_font
+        )
+
+        tiny_w = (
+            tiny_bbox[2]
+            - tiny_bbox[0]
+        )
+
+        tiny_h = (
+            tiny_bbox[3]
+            - tiny_bbox[1]
+        )
+
+        tiny_x = 36
+
+        tiny_y = (
+            photo_y
+            + PHOTO_SIZE
+            - 38
+            - tiny_h
+        )
+
+        # soft translucent background
+        draw.rounded_rectangle(
+            (
+                tiny_x - 12,
+                tiny_y - 8,
+                tiny_x + tiny_w + 12,
+                tiny_y + tiny_h + 8
+            ),
+            radius=10,
+            fill=(
+                0,
+                0,
+                0,
+                105
+            )
+        )
+
+        draw.text(
+            (
+                tiny_x,
+                tiny_y
+            ),
+            tiny_text,
+            font=small_latin_font,
+            fill=(
+                255,
+                255,
+                255,
+                225
+            )
+        )
+
+        # ----------------------------------------------------
+        # Export
         # ----------------------------------------------------
 
         output = io.BytesIO()
 
-        card.save(
+        base.convert(
+            "RGB"
+        ).save(
             output,
             format="JPEG",
             quality=95,
-            optimize=True,
+            optimize=True
         )
 
         output.seek(0)
 
         print(
-            "✓ Photo card created"
+            "✓ Premium photo card created"
         )
 
         return output
@@ -1640,7 +2123,7 @@ def create_photo_card(
     except Exception as e:
 
         print(
-            f"✗ Photo card creation "
+            f"✗ Premium photo card creation "
             f"failed: {e}"
         )
 
