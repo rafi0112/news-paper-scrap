@@ -948,6 +948,10 @@ def get_unposted_news():
             "facebook_posted",
             False
         )
+        .neq(
+            "source",
+            "The Daily Star"
+        )
         .not_.is_(
             "image",
             "null"
@@ -963,7 +967,6 @@ def get_unposted_news():
     )
 
     return result.data or []
-
 
 # =========================================================
 # MARK POSTED
