@@ -5,16 +5,15 @@ import re
 import requests
 
 from urllib.parse import urljoin
-
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageFilter
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
-from supabase import create_client
+from supabase import create_client, Client
 
 
-# =========================================================
-# ENVIRONMENT
-# =========================================================
+# ============================================================
+# CONFIG
+# ============================================================
 
 load_dotenv()
 
@@ -31,41 +30,23 @@ META_GRAPH_VERSION = os.getenv(
     "v25.0"
 )
 
-
-# =========================================================
-# CONFIG
-# =========================================================
-
-# TEST WITH 1 FIRST
-# MAX_POSTS_PER_RUN = 1
-
-# After successful test:
 MAX_POSTS_PER_RUN = 3
 
 CARD_WIDTH = 1200
 CARD_HEIGHT = 1200
 
-IMAGE_TIMEOUT = 25
-ARTICLE_TIMEOUT = 25
-
-USER_AGENT = (
-    "Mozilla/5.0 (X11; Linux x86_64) "
-    "AppleWebKit/537.36 "
-    "(KHTML, like Gecko) "
-    "Chrome/131.0 Safari/537.36"
-)
+REQUEST_TIMEOUT = 25
 
 
-# =========================================================
+# ============================================================
 # VALIDATE ENVIRONMENT
-# =========================================================
+# ============================================================
 
 required = {
     "SUPABASE_URL": SUPABASE_URL,
     "SUPABASE_KEY": SUPABASE_KEY,
     "FACEBOOK_PAGE_ID": FACEBOOK_PAGE_ID,
-    "FACEBOOK_PAGE_ACCESS_TOKEN":
-        FACEBOOK_PAGE_ACCESS_TOKEN,
+    "FACEBOOK_PAGE_ACCESS_TOKEN": FACEBOOK_PAGE_ACCESS_TOKEN,
 }
 
 missing = [
@@ -75,172 +56,154 @@ missing = [
 ]
 
 if missing:
-
     raise RuntimeError(
         "Missing environment variables: "
         + ", ".join(missing)
     )
 
 
-# =========================================================
-# SUPABASE
-# =========================================================
-
-supabase = create_client(
+supabase: Client = create_client(
     SUPABASE_URL,
     SUPABASE_KEY
 )
 
 
-# =========================================================
-# FONT FINDER
-# =========================================================
+# ============================================================
+# HTTP SESSION
+# ============================================================
+
+session = requests.Session()
+
+session.headers.update({
+    "User-Agent": (
+        "Mozilla/5.0 (X11; Linux x86_64) "
+        "AppleWebKit/537.36 "
+        "(KHTML, like Gecko) "
+        "Chrome/131.0 Safari/537.36"
+    ),
+    "Accept": (
+        "text/html,application/xhtml+xml,"
+        "application/xml;q=0.9,image/avif,"
+        "image/webp,*/*;q=0.8"
+    ),
+})
+
+
+# ============================================================
+# FONT
+# ============================================================
 
 def get_font(size, bold=False):
 
-    """
-    Find Bengali-capable Noto font.
+    # IMPORTANT:
+    # Bengali fonts MUST come before DejaVu.
 
-    GitHub Actions installs it through:
-        fonts-noto-core
-    """
+    preferred = []
 
     if bold:
-
-        preferred = [
+        preferred.extend([
+            "/usr/share/fonts/truetype/noto/"
             "NotoSansBengali-Bold.ttf",
+
+            "/usr/share/fonts/opentype/noto/"
+            "NotoSansBengali-Bold.ttf",
+
+            "/usr/share/fonts/truetype/noto/"
             "NotoSansBengaliUI-Bold.ttf",
-            "NotoSans-Bold.ttf",
-            "DejaVuSans-Bold.ttf",
-        ]
+        ])
 
     else:
-
-        preferred = [
+        preferred.extend([
+            "/usr/share/fonts/truetype/noto/"
             "NotoSansBengali-Regular.ttf",
-            "NotoSansBengaliUI-Regular.ttf",
-            "NotoSans-Regular.ttf",
-            "DejaVuSans.ttf",
-        ]
 
+            "/usr/share/fonts/opentype/noto/"
+            "NotoSansBengali-Regular.ttf",
+
+            "/usr/share/fonts/truetype/noto/"
+            "NotoSansBengaliUI-Regular.ttf",
+        ])
+
+    # Search preferred fonts first
+    for path in preferred:
+        if os.path.exists(path):
+            print(f"Font: {path}")
+            return ImageFont.truetype(path, size)
+
+    # Recursive search
     search_dirs = [
         "/usr/share/fonts",
         "/usr/local/share/fonts",
     ]
 
-    # -----------------------------------------------------
-    # Search recursively
-    # -----------------------------------------------------
+    patterns = []
 
-    for root_dir in search_dirs:
+    if bold:
+        patterns = [
+            "NotoSansBengali-Bold.ttf",
+            "NotoSansBengaliUI-Bold.ttf",
+            "NotoSans-Bold.ttf",
+        ]
+    else:
+        patterns = [
+            "NotoSansBengali-Regular.ttf",
+            "NotoSansBengaliUI-Regular.ttf",
+            "NotoSans-Regular.ttf",
+        ]
 
-        for root, dirs, files in os.walk(
-            root_dir
-        ):
+    for root in search_dirs:
 
-            for filename in files:
+        for dirpath, _, filenames in os.walk(root):
 
-                if filename in preferred:
+            for filename in filenames:
+
+                if filename in patterns:
 
                     path = os.path.join(
-                        root,
+                        dirpath,
                         filename
                     )
 
-                    try:
-
-                        print(
-                            f"Font: {path}"
-                        )
-
-                        return ImageFont.truetype(
-                            path,
-                            size
-                        )
-
-                    except Exception:
-                        pass
-
-    # -----------------------------------------------------
-    # Repository font fallback
-    # -----------------------------------------------------
-
-    for directory in [
-        "fonts",
-        "./fonts",
-    ]:
-
-        for filename in preferred:
-
-            path = os.path.join(
-                directory,
-                filename
-            )
-
-            if os.path.exists(path):
-
-                try:
-
-                    print(
-                        f"Font: {path}"
-                    )
+                    print(f"Font: {path}")
 
                     return ImageFont.truetype(
                         path,
                         size
                     )
 
-                except Exception:
-                    pass
-
-    print(
-        "WARNING: Bengali font not found."
+    # Final fallback
+    fallback = (
+        "/usr/share/fonts/truetype/dejavu/"
+        "DejaVuSans-Bold.ttf"
+        if bold
+        else
+        "/usr/share/fonts/truetype/dejavu/"
+        "DejaVuSans.ttf"
     )
 
-    return ImageFont.load_default()
+    print(f"WARNING: Bengali Noto font not found.")
+    print(f"Font fallback: {fallback}")
 
-
-# =========================================================
-# TEXT WIDTH
-# =========================================================
-
-def get_text_width(
-    draw,
-    text,
-    font
-):
-
-    bbox = draw.textbbox(
-        (0, 0),
-        text,
-        font=font
-    )
-
-    return (
-        bbox[2]
-        - bbox[0]
+    return ImageFont.truetype(
+        fallback,
+        size
     )
 
 
-# =========================================================
-# TEXT WRAP
-# =========================================================
+# ============================================================
+# TEXT WRAPPING
+# ============================================================
 
 def wrap_text(
     draw,
     text,
     font,
-    max_width,
-    max_lines=4
+    max_width
 ):
 
-    words = str(text).split()
-
-    if not words:
-        return []
+    words = text.split()
 
     lines = []
-
     current = ""
 
     for word in words:
@@ -248,16 +211,16 @@ def wrap_text(
         test = (
             word
             if not current
-            else current
-            + " "
-            + word
+            else current + " " + word
         )
 
-        width = get_text_width(
-            draw,
+        bbox = draw.textbbox(
+            (0, 0),
             test,
-            font
+            font=font
         )
+
+        width = bbox[2] - bbox[0]
 
         if width <= max_width:
 
@@ -266,197 +229,143 @@ def wrap_text(
         else:
 
             if current:
-
-                lines.append(
-                    current
-                )
+                lines.append(current)
 
             current = word
 
     if current:
-
-        lines.append(
-            current
-        )
-
-    # -----------------------------------------------------
-    # Maximum line count
-    # -----------------------------------------------------
-
-    if len(lines) <= max_lines:
-
-        return lines
-
-    lines = lines[:max_lines]
-
-    # Add ...
-    last = lines[-1]
-
-    while len(last) > 1:
-
-        candidate = (
-            last.rstrip()
-            + "..."
-        )
-
-        if (
-            get_text_width(
-                draw,
-                candidate,
-                font
-            )
-            <= max_width
-        ):
-
-            lines[-1] = candidate
-            break
-
-        last = last[:-1]
+        lines.append(current)
 
     return lines
 
 
-# =========================================================
-# GENERIC IMAGE DETECTOR
-# =========================================================
+# ============================================================
+# GENERIC IMAGE DETECTION
+# ============================================================
 
-def is_generic_image(
-    image_url
-):
+def is_generic_image(url):
 
-    if not image_url:
-
+    if not url:
         return True
 
-    url = image_url.lower()
+    lower = url.lower()
 
-    generic_words = [
-        "banner",
-        "logo",
-        "default",
+    # These are truly generic images.
+    bad_patterns = [
+        "banner.png",
+        "banner.jpg",
+        "banner.jpeg",
+        "/logo.",
+        "logo.png",
+        "logo.jpg",
+        "logo.jpeg",
+        "default.jpg",
+        "default.png",
+        "default.jpeg",
         "placeholder",
-        "share-image",
-        "share_image",
         "og-default",
-        "og_default",
         "fallback",
         "avatar",
-        "icon",
-        "site-logo",
-        "site_logo",
+        "/icon.",
+        "icon.png",
+        "icon.jpg",
     ]
 
-    for word in generic_words:
+    for pattern in bad_patterns:
 
-        if word in url:
-
+        if pattern in lower:
             return True
+
+    # IMPORTANT:
+    #
+    # DO NOT reject:
+    #
+    # social_share
+    # share-image
+    #
+    # because TBS can use /styles/social_share/
+    # for a real article photograph.
 
     return False
 
 
-# =========================================================
+# ============================================================
 # DOWNLOAD IMAGE
-# =========================================================
+# ============================================================
 
-def download_image(
-    image_url
-):
+def download_image(url):
 
-    if not image_url:
+    if not url:
+        return None
+
+    try:
+
+        print(f"Downloading image: {url}")
+
+        response = session.get(
+            url,
+            timeout=REQUEST_TIMEOUT,
+            allow_redirects=True
+        )
+
+        response.raise_for_status()
+
+        content_type = (
+            response.headers
+            .get("Content-Type", "")
+            .lower()
+        )
+
+        # Make sure this is actually an image.
+        if (
+            not content_type.startswith("image/")
+            and not url.lower().endswith(
+                (
+                    ".jpg",
+                    ".jpeg",
+                    ".png",
+                    ".webp",
+                    ".gif",
+                )
+            )
+        ):
+
+            print(
+                f"✗ Not an image response: "
+                f"{content_type}"
+            )
+
+            return None
+
+        image = Image.open(
+            io.BytesIO(response.content)
+        )
+
+        image.load()
+
+        print(
+            f"✓ Image downloaded "
+            f"({image.width}, {image.height})"
+        )
+
+        return image.convert("RGB")
+
+    except Exception as e:
+
+        print(
+            f"✗ Image download failed: {e}"
+        )
 
         return None
 
-    urls = [
-        image_url
-    ]
 
-    # HTTP fallback
-    if image_url.startswith(
-        "https://"
-    ):
+# ============================================================
+# ARTICLE IMAGE EXTRACTION
+# ============================================================
 
-        urls.append(
-            image_url.replace(
-                "https://",
-                "http://",
-                1
-            )
-        )
-
-    for url in urls:
-
-        try:
-
-            print(
-                f"Downloading image: {url}"
-            )
-
-            response = requests.get(
-                url,
-                headers={
-                    "User-Agent":
-                        USER_AGENT,
-                    "Accept":
-                        "image/avif,"
-                        "image/webp,"
-                        "image/apng,"
-                        "image/jpeg,"
-                        "image/png,"
-                        "image/*,"
-                        "*/*;q=0.8",
-                },
-                timeout=IMAGE_TIMEOUT
-            )
-
-            response.raise_for_status()
-
-            image = Image.open(
-                io.BytesIO(
-                    response.content
-                )
-            )
-
-            image = image.convert(
-                "RGB"
-            )
-
-            print(
-                f"✓ Image downloaded "
-                f"{image.size}"
-            )
-
-            return image
-
-        except Exception as e:
-
-            print(
-                f"Image download failed: {e}"
-            )
-
-    return None
-
-
-# =========================================================
-# EXTRACT ARTICLE IMAGE
-# =========================================================
-
-def extract_article_image(
-    article_url
-):
-
-    """
-    Open actual article page and find:
-        og:image
-        twitter:image
-        JSON-LD image
-
-    This fixes cases where scraper stored
-    generic banner/logo image.
-    """
+def extract_article_image(article_url):
 
     if not article_url:
-
         return None
 
     try:
@@ -466,16 +375,9 @@ def extract_article_image(
             "actual article image..."
         )
 
-        response = requests.get(
+        response = session.get(
             article_url,
-            headers={
-                "User-Agent":
-                    USER_AGENT,
-                "Accept":
-                    "text/html,"
-                    "application/xhtml+xml"
-            },
-            timeout=ARTICLE_TIMEOUT
+            timeout=REQUEST_TIMEOUT
         )
 
         response.raise_for_status()
@@ -485,139 +387,79 @@ def extract_article_image(
             "html.parser"
         )
 
-        # =================================================
+        # ----------------------------------------------------
         # 1. OG IMAGE
-        # =================================================
+        # ----------------------------------------------------
 
-        meta = soup.find(
+        og = soup.find(
             "meta",
-            attrs={
-                "property":
-                    "og:image"
-            }
+            property="og:image"
         )
 
-        if meta:
+        if og and og.get("content"):
 
-            image_url = (
-                meta.get("content")
+            image_url = urljoin(
+                article_url,
+                og["content"].strip()
             )
 
-            if image_url:
+            if not is_generic_image(image_url):
 
-                image_url = urljoin(
-                    article_url,
-                    image_url
+                print(
+                    f"✓ Found og:image: "
+                    f"{image_url}"
                 )
 
-                if not is_generic_image(
-                    image_url
-                ):
+                return image_url
 
-                    print(
-                        "✓ Found og:image:"
-                    )
-
-                    print(
-                        image_url
-                    )
-
-                    return image_url
-
-        # =================================================
+        # ----------------------------------------------------
         # 2. TWITTER IMAGE
-        # =================================================
+        # ----------------------------------------------------
 
-        meta = soup.find(
+        twitter = soup.find(
             "meta",
             attrs={
-                "name":
-                    "twitter:image"
+                "name": "twitter:image"
             }
         )
 
-        if meta:
+        if twitter and twitter.get("content"):
 
-            image_url = (
-                meta.get("content")
+            image_url = urljoin(
+                article_url,
+                twitter["content"].strip()
             )
 
-            if image_url:
+            if not is_generic_image(image_url):
 
-                image_url = urljoin(
-                    article_url,
-                    image_url
+                print(
+                    f"✓ Found twitter:image: "
+                    f"{image_url}"
                 )
 
-                if not is_generic_image(
-                    image_url
-                ):
+                return image_url
 
-                    print(
-                        "✓ Found twitter:image:"
-                    )
-
-                    print(
-                        image_url
-                    )
-
-                    return image_url
-
-        # =================================================
+        # ----------------------------------------------------
         # 3. JSON-LD
-        # =================================================
+        # ----------------------------------------------------
 
-        scripts = soup.find_all(
+        for script in soup.find_all(
             "script",
-            attrs={
-                "type":
-                    "application/ld+json"
-            }
-        )
-
-        for script in scripts:
+            type="application/ld+json"
+        ):
 
             try:
 
-                raw = script.string
-
-                if not raw:
-                    continue
-
                 data = json.loads(
-                    raw
+                    script.string or
+                    script.get_text()
                 )
 
-                objects = []
-
-                if isinstance(
-                    data,
-                    list
-                ):
-
-                    objects = data
-
-                elif isinstance(
-                    data,
-                    dict
-                ):
-
-                    objects = [
-                        data
-                    ]
-
-                    graph = data.get(
-                        "@graph"
-                    )
-
-                    if isinstance(
-                        graph,
-                        list
-                    ):
-
-                        objects.extend(
-                            graph
-                        )
+                objects = (
+                    data
+                    if isinstance(data, list)
+                    else [data]
+                )
 
                 for obj in objects:
 
@@ -625,80 +467,38 @@ def extract_article_image(
                         obj,
                         dict
                     ):
-
                         continue
 
-                    image = obj.get(
-                        "image"
-                    )
+                    image = obj.get("image")
 
-                    # String
                     if isinstance(
                         image,
                         str
                     ):
 
-                        image = urljoin(
+                        image_url = urljoin(
                             article_url,
                             image
                         )
 
                         if not is_generic_image(
-                            image
+                            image_url
                         ):
 
                             print(
-                                "✓ Found JSON-LD image:"
+                                "✓ Found "
+                                "JSON-LD image"
                             )
 
-                            print(
-                                image
-                            )
+                            return image_url
 
-                            return image
-
-                    # List
-                    if isinstance(
-                        image,
-                        list
-                    ):
-
-                        for item in image:
-
-                            if isinstance(
-                                item,
-                                str
-                            ):
-
-                                item = urljoin(
-                                    article_url,
-                                    item
-                                )
-
-                                if not is_generic_image(
-                                    item
-                                ):
-
-                                    print(
-                                        "✓ Found JSON-LD image:"
-                                    )
-
-                                    print(
-                                        item
-                                    )
-
-                                    return item
-
-                    # Dict
                     if isinstance(
                         image,
                         dict
                     ):
 
-                        image_url = (
-                            image.get(
-                                "url"
-                            )
+                        image_url = image.get(
+                            "url"
                         )
 
                         if image_url:
@@ -713,191 +513,178 @@ def extract_article_image(
                             ):
 
                                 print(
-                                    "✓ Found JSON-LD image:"
-                                )
-
-                                print(
-                                    image_url
+                                    "✓ Found "
+                                    "JSON-LD image"
                                 )
 
                                 return image_url
 
+                    if isinstance(
+                        image,
+                        list
+                    ):
+
+                        for item in image:
+
+                            if isinstance(
+                                item,
+                                str
+                            ):
+
+                                image_url = urljoin(
+                                    article_url,
+                                    item
+                                )
+
+                                if not is_generic_image(
+                                    image_url
+                                ):
+
+                                    print(
+                                        "✓ Found "
+                                        "JSON-LD image"
+                                    )
+
+                                    return image_url
+
             except Exception:
                 continue
+
+        print(
+            "✗ Could not find actual "
+            "article image."
+        )
+
+        return None
 
     except Exception as e:
 
         print(
-            "Article page image extraction failed:"
+            f"✗ Article page image "
+            f"extraction failed: {e}"
         )
 
-        print(
-            str(e)
-        )
-
-    return None
+        return None
 
 
-# =========================================================
-# RESOLVE BEST IMAGE
-# =========================================================
+# ============================================================
+# RESOLVE IMAGE
+# ============================================================
 
 def resolve_article_image(
     stored_image,
     article_url
 ):
 
-    """
-    Decide which image to use.
+    # --------------------------------------------------------
+    # FIRST:
+    # Try the stored image directly.
+    #
+    # This is the important fix for TBS.
+    # --------------------------------------------------------
 
-    If stored image looks like banner/logo,
-    fetch actual image from article page.
-    """
-
-    # -----------------------------------------------------
-    # Case 1:
-    # Stored image looks generic
-    # -----------------------------------------------------
-
-    if is_generic_image(
-        stored_image
-    ):
+    if stored_image:
 
         print(
-            "⚠ Stored image looks like "
-            "banner/logo/default."
+            f"Stored image: {stored_image}"
         )
 
-        actual_image_url = (
-            extract_article_image(
-                article_url
+        if not is_generic_image(
+            stored_image
+        ):
+
+            print(
+                "Stored image appears to "
+                "be an article image."
             )
-        )
 
-        if actual_image_url:
+            image = download_image(
+                stored_image
+            )
 
-            return actual_image_url
+            if image is not None:
 
-        print(
-            "✗ Could not find actual article image."
-        )
+                return image
 
-        return None
+            print(
+                "Stored image download failed."
+            )
 
-    # -----------------------------------------------------
-    # Case 2:
-    # Stored image looks normal
-    # -----------------------------------------------------
+    # --------------------------------------------------------
+    # SECOND:
+    # Try article-page metadata.
+    # --------------------------------------------------------
 
-    print(
-        "Stored image appears to be "
-        "an article image."
+    actual_url = extract_article_image(
+        article_url
     )
 
-    return stored_image
+    if actual_url:
+
+        image = download_image(
+            actual_url
+        )
+
+        if image is not None:
+
+            return image
+
+    # --------------------------------------------------------
+    # Nothing worked.
+    # --------------------------------------------------------
+
+    print(
+        "✗ No usable article image found."
+    )
+
+    return None
 
 
-# =========================================================
-# COVER CROP
-# =========================================================
+# ============================================================
+# CROP IMAGE TO SQUARE
+# ============================================================
 
-def crop_to_square(
-    image
-):
+def crop_to_square(image):
 
     width, height = image.size
 
-    if width == height:
+    size = min(
+        width,
+        height
+    )
 
-        return image
-
-    if width > height:
-
-        crop = height
-
-        left = (
-            width
-            - crop
-        ) // 2
-
-        return image.crop(
-            (
-                left,
-                0,
-                left + crop,
-                height
-            )
-        )
-
-    crop = width
+    left = (
+        width - size
+    ) // 2
 
     top = (
-        height
-        - crop
+        height - size
     ) // 2
+
+    right = left + size
+    bottom = top + size
 
     return image.crop(
         (
-            0,
+            left,
             top,
-            width,
-            top + crop
+            right,
+            bottom
         )
     )
 
 
-# =========================================================
+# ============================================================
 # CREATE MODERN PHOTO CARD
-# =========================================================
+# ============================================================
 
 def create_photo_card(
-    image_url,
+    image,
     title,
-    source,
-    article_url
+    source
 ):
 
-    # -----------------------------------------------------
-    # Resolve actual article image
-    # -----------------------------------------------------
-
-    best_image_url = (
-        resolve_article_image(
-            image_url,
-            article_url
-        )
-    )
-
-    if not best_image_url:
-
-        print(
-            "✗ No usable article image found."
-        )
-
-        return None
-
-    # -----------------------------------------------------
-    # Download
-    # -----------------------------------------------------
-
-    image = download_image(
-        best_image_url
-    )
-
-    if image is None:
-
-        print(
-            "✗ Actual article image "
-            "could not be downloaded."
-        )
-
-        return None
-
     try:
-
-        # =================================================
-        # ORIGINAL PHOTO
-        # =================================================
 
         image = crop_to_square(
             image
@@ -911,62 +698,114 @@ def create_photo_card(
             Image.Resampling.LANCZOS
         )
 
-        image = image.convert(
-            "RGBA"
+        # ----------------------------------------------------
+        # Slight blur background layer
+        # ----------------------------------------------------
+
+        background = image.copy()
+
+        background = background.filter(
+            ImageFilter.GaussianBlur(8)
         )
 
-        # =================================================
-        # OVERLAY
-        # =================================================
-
+        # Darken background
         overlay = Image.new(
             "RGBA",
-            (
-                CARD_WIDTH,
-                CARD_HEIGHT
-            ),
-            (
-                0,
-                0,
-                0,
-                0
-            )
+            background.size,
+            (0, 0, 0, 65)
         )
 
-        draw = ImageDraw.Draw(
+        background = Image.alpha_composite(
+            background.convert("RGBA"),
             overlay
         )
 
-        # -------------------------------------------------
-        # Bottom gradient
-        # -------------------------------------------------
+        card = background.convert(
+            "RGBA"
+        )
 
-        gradient_start = 500
+        # ----------------------------------------------------
+        # Main image
+        # ----------------------------------------------------
+
+        card.alpha_composite(
+            image.convert("RGBA")
+        )
+
+        # ----------------------------------------------------
+        # Top gradient
+        # ----------------------------------------------------
+
+        gradient = Image.new(
+            "RGBA",
+            card.size,
+            (0, 0, 0, 0)
+        )
+
+        gd = ImageDraw.Draw(
+            gradient
+        )
+
+        for y in range(500):
+
+            alpha = int(
+                150 * (1 - y / 500)
+            )
+
+            gd.line(
+                [
+                    (0, y),
+                    (CARD_WIDTH, y)
+                ],
+                fill=(
+                    0,
+                    0,
+                    0,
+                    alpha
+                )
+            )
+
+        card = Image.alpha_composite(
+            card,
+            gradient
+        )
+
+        # ----------------------------------------------------
+        # Bottom gradient
+        # ----------------------------------------------------
+
+        gradient2 = Image.new(
+            "RGBA",
+            card.size,
+            (0, 0, 0, 0)
+        )
+
+        gd2 = ImageDraw.Draw(
+            gradient2
+        )
+
+        start_y = 600
 
         for y in range(
-            gradient_start,
+            start_y,
             CARD_HEIGHT
         ):
 
             progress = (
-                y
-                - gradient_start
+                y - start_y
             ) / (
-                CARD_HEIGHT
-                - gradient_start
+                CARD_HEIGHT - start_y
             )
 
             alpha = int(
-                235 * progress
+                20 + 205 * progress
             )
 
-            draw.line(
-                (
-                    0,
-                    y,
-                    CARD_WIDTH,
-                    y
-                ),
+            gd2.line(
+                [
+                    (0, y),
+                    (CARD_WIDTH, y)
+                ],
                 fill=(
                     0,
                     0,
@@ -975,147 +814,161 @@ def create_photo_card(
                 )
             )
 
-        # -------------------------------------------------
-        # Very subtle top gradient
-        # -------------------------------------------------
-
-        for y in range(
-            0,
-            170
-        ):
-
-            alpha = int(
-                100
-                * (
-                    1
-                    - y / 170
-                )
-            )
-
-            draw.line(
-                (
-                    0,
-                    y,
-                    CARD_WIDTH,
-                    y
-                ),
-                fill=(
-                    0,
-                    0,
-                    0,
-                    alpha
-                )
-            )
-
-        image = Image.alpha_composite(
-            image,
-            overlay
+        card = Image.alpha_composite(
+            card,
+            gradient2
         )
 
         draw = ImageDraw.Draw(
-            image
+            card
         )
 
-        # =================================================
-        # FONTS
-        # =================================================
+        # ----------------------------------------------------
+        # Source badge
+        # ----------------------------------------------------
 
         source_font = get_font(
-            34,
+            28,
             bold=True
         )
 
-        title_font = get_font(
-            62,
-            bold=True
-        )
+        badge_text = source
 
-        # =================================================
-        # SOURCE
-        # =================================================
-
-        source_text = str(
-            source
-        ).strip()
-
-        source_x = 70
-        source_y = 710
-
-        source_bbox = draw.textbbox(
-            (
-                0,
-                0
-            ),
-            source_text,
+        bbox = draw.textbbox(
+            (0, 0),
+            badge_text,
             font=source_font
         )
 
-        source_width = (
-            source_bbox[2]
-            - source_bbox[0]
+        text_width = (
+            bbox[2] - bbox[0]
         )
 
-        source_height = (
-            source_bbox[3]
-            - source_bbox[1]
+        badge_x = 55
+        badge_y = 55
+
+        badge_width = (
+            text_width + 44
         )
 
-        # Clean modern pill
+        badge_height = 54
+
         draw.rounded_rectangle(
             (
-                source_x - 18,
-                source_y - 10,
-                source_x
-                + source_width
-                + 18,
-                source_y
-                + source_height
-                + 18
+                badge_x,
+                badge_y,
+                badge_x + badge_width,
+                badge_y + badge_height
             ),
-            radius=16,
+            radius=27,
             fill=(
                 255,
                 255,
                 255,
-                235
+                225
             )
         )
 
         draw.text(
             (
-                source_x,
-                source_y
+                badge_x + 22,
+                badge_y + 8
             ),
-            source_text,
+            badge_text,
             font=source_font,
             fill=(
-                25,
-                25,
-                25
+                20,
+                20,
+                20,
+                255
             )
         )
 
-        # =================================================
-        # EXACT ARTICLE TITLE
-        # =================================================
+        # ----------------------------------------------------
+        # Title
+        # ----------------------------------------------------
 
-        title_lines = wrap_text(
+        title_font = get_font(
+            58,
+            bold=True
+        )
+
+        max_width = 1050
+
+        lines = wrap_text(
             draw,
             title,
             title_font,
-            CARD_WIDTH - 140,
-            max_lines=4
+            max_width
         )
 
-        title_y = 800
+        # Limit title height
+        max_lines = 5
 
-        for line in title_lines:
+        if len(lines) > max_lines:
 
-            # Shadow
+            lines = lines[:max_lines]
+
+            last = lines[-1]
+
+            while True:
+
+                test = last + "..."
+
+                bbox = draw.textbbox(
+                    (0, 0),
+                    test,
+                    font=title_font
+                )
+
+                if (
+                    bbox[2] - bbox[0]
+                    <= max_width
+                ):
+                    lines[-1] = test
+                    break
+
+                last = last[:-1]
+
+        line_spacing = 12
+
+        heights = []
+
+        for line in lines:
+
+            bbox = draw.textbbox(
+                (0, 0),
+                line,
+                font=title_font
+            )
+
+            heights.append(
+                bbox[3] - bbox[1]
+            )
+
+        total_height = (
+            sum(heights)
+            + line_spacing * (
+                len(lines) - 1
+            )
+        )
+
+        y = (
+            CARD_HEIGHT
+            - total_height
+            - 90
+        )
+
+        # Text shadow
+        for line, height in zip(
+            lines,
+            heights
+        ):
+
             draw.text(
                 (
-                    72,
-                    title_y + 3
+                    60 + 3,
+                    y + 3
                 ),
                 line,
                 font=title_font,
@@ -1123,15 +976,14 @@ def create_photo_card(
                     0,
                     0,
                     0,
-                    170
+                    180
                 )
             )
 
-            # Actual title
             draw.text(
                 (
-                    70,
-                    title_y
+                    60,
+                    y
                 ),
                 line,
                 font=title_font,
@@ -1143,34 +995,18 @@ def create_photo_card(
                 )
             )
 
-            bbox = draw.textbbox(
-                (
-                    0,
-                    0
-                ),
-                line,
-                font=title_font
+            y += (
+                height
+                + line_spacing
             )
 
-            line_height = (
-                bbox[3]
-                - bbox[1]
-            )
-
-            title_y += (
-                line_height
-                + 12
-            )
-
-        # =================================================
-        # SAVE
-        # =================================================
+        # ----------------------------------------------------
+        # Export
+        # ----------------------------------------------------
 
         output = io.BytesIO()
 
-        image.convert(
-            "RGB"
-        ).save(
+        card.convert("RGB").save(
             output,
             format="JPEG",
             quality=94,
@@ -1188,22 +1024,19 @@ def create_photo_card(
     except Exception as e:
 
         print(
-            "Card creation error:"
-        )
-
-        print(
-            str(e)
+            f"✗ Photo card creation "
+            f"failed: {e}"
         )
 
         return None
 
 
-# =========================================================
+# ============================================================
 # FACEBOOK POST
-# =========================================================
+# ============================================================
 
 def post_to_facebook(
-    card_file,
+    photo_bytes,
     title,
     article_url
 ):
@@ -1214,77 +1047,53 @@ def post_to_facebook(
         f"{FACEBOOK_PAGE_ID}/photos"
     )
 
-    # =====================================================
-    # CLEAN CAPTION
-    # =====================================================
-    #
-    # NO:
-    #   Source:
-    #   বিস্তারিত পড়ুন:
-    #   NEWS UPDATE
-    #   extra generated text
-    #
-    # Only exact article title + URL.
-    # =====================================================
-
     caption = (
         f"{title}\n\n"
         f"{article_url}"
     )
 
-    files = {
-        "source": (
-            "news-card.jpg",
-            card_file,
-            "image/jpeg"
-        )
-    }
-
-    data = {
-        "caption": caption,
-        "access_token":
-            FACEBOOK_PAGE_ACCESS_TOKEN
-    }
-
-    print(
-        "Posting photo card to Facebook..."
-    )
-
-    response = requests.post(
-        endpoint,
-        files=files,
-        data=data,
-        timeout=60
-    )
-
     try:
 
-        result = response.json()
-
-    except Exception:
-
-        result = {
-            "response":
-                response.text
-        }
-
-    if response.status_code >= 400:
-
-        raise Exception(
-            "Facebook API error: "
-            + str(result)
+        response = requests.post(
+            endpoint,
+            data={
+                "access_token":
+                    FACEBOOK_PAGE_ACCESS_TOKEN,
+                "caption":
+                    caption,
+            },
+            files={
+                "source": (
+                    "news.jpg",
+                    photo_bytes,
+                    "image/jpeg"
+                )
+            },
+            timeout=60
         )
 
-    print(
-        "✓ Facebook post successful"
-    )
+        data = response.json()
 
-    return result
+        if response.ok and data.get("id"):
+
+            return data["id"], None
+
+        return (
+            None,
+            data.get(
+                "error",
+                data
+            )
+        )
+
+    except Exception as e:
+
+        return None, str(e)
 
 
-# =========================================================
+# ============================================================
 # GET UNPOSTED NEWS
-# =========================================================
+# ============================================================
 
 def get_unposted_news():
 
@@ -1319,40 +1128,54 @@ def get_unposted_news():
     return result.data or []
 
 
-# =========================================================
+# ============================================================
 # MARK POSTED
-# =========================================================
+# ============================================================
 
 def mark_posted(
     news_id,
     post_id
 ):
 
-    (
-        supabase
-        .table("news")
-        .update({
-            "facebook_posted": True,
-            "facebook_post_id": post_id,
-            "facebook_posted_at": "now()",
-            "facebook_error": None
-        })
-        .eq(
+    try:
+
+        supabase.table(
+            "news"
+        ).update({
+
+            "facebook_posted":
+                True,
+
+            "facebook_post_id":
+                post_id,
+
+            "facebook_posted_at":
+                "now()",
+
+            "facebook_error":
+                None,
+
+        }).eq(
             "id",
             news_id
+        ).execute()
+
+        print(
+            "✓ Supabase: "
+            "facebook_posted = TRUE"
         )
-        .execute()
-    )
 
-    print(
-        "✓ Supabase: "
-        "facebook_posted = TRUE"
-    )
+    except Exception as e:
+
+        print(
+            "✗ Supabase update failed:",
+            e
+        )
 
 
-# =========================================================
+# ============================================================
 # SAVE ERROR
-# =========================================================
+# ============================================================
 
 def save_error(
     news_id,
@@ -1361,39 +1184,37 @@ def save_error(
 
     try:
 
-        (
-            supabase
-            .table("news")
-            .update({
-                "facebook_error":
-                    str(error)
-            })
-            .eq(
-                "id",
-                news_id
-            )
-            .execute()
-        )
+        supabase.table(
+            "news"
+        ).update({
+
+            "facebook_error":
+                str(error),
+
+            "facebook_posted":
+                False,
+
+        }).eq(
+            "id",
+            news_id
+        ).execute()
 
     except Exception as e:
 
         print(
-            "Could not save error:"
-        )
-
-        print(
-            str(e)
+            "✗ Could not save error:",
+            e
         )
 
 
-# =========================================================
+# ============================================================
 # MAIN
-# =========================================================
+# ============================================================
 
 def main():
 
     print(
-        "=========================================="
+        "\n=========================================="
     )
 
     print(
@@ -1418,57 +1239,39 @@ def main():
         "Daily Star: SKIPPED"
     )
 
-    # =====================================================
-    # GET NEWS
-    # =====================================================
-
-    news_list = get_unposted_news()
+    news = get_unposted_news()
 
     print(
-        f"Found {len(news_list)} news."
+        f"Found {len(news)} news."
     )
-
-    if not news_list:
-
-        print(
-            "No eligible unposted news."
-        )
-
-        return
 
     posted_count = 0
 
-    # =====================================================
-    # PROCESS
-    # =====================================================
-
-    for article in news_list:
-
-        news_id = article.get(
-            "id"
-        )
-
-        title = article.get(
-            "title",
-            ""
-        )
-
-        source = article.get(
-            "source",
-            ""
-        )
-
-        stored_image = article.get(
-            "image"
-        )
-
-        article_url = article.get(
-            "url",
-            ""
-        )
+    for article in news:
 
         print(
             "\n------------------------------------------"
+        )
+
+        news_id = article["id"]
+
+        title = (
+            article.get("title")
+            or "Untitled"
+        )
+
+        source = (
+            article.get("source")
+            or ""
+        )
+
+        article_url = (
+            article.get("url")
+            or ""
+        )
+
+        stored_image = (
+            article.get("image")
         )
 
         print(
@@ -1483,76 +1286,108 @@ def main():
             f"Article URL: {article_url}"
         )
 
-        print(
-            f"Stored image: {stored_image}"
-        )
-
         try:
 
-            # =================================================
-            # 1. CREATE MODERN PHOTO CARD
-            # =================================================
+            image = resolve_article_image(
+                stored_image,
+                article_url
+            )
+
+            if image is None:
+
+                error = (
+                    "Could not obtain a "
+                    "usable original article image."
+                )
+
+                print(
+                    f"✗ FAILED\n{error}"
+                )
+
+                save_error(
+                    news_id,
+                    error
+                )
+
+                continue
 
             card = create_photo_card(
-                stored_image,
+                image,
                 title,
-                source,
-                article_url
+                source
             )
 
             if card is None:
 
-                raise Exception(
-                    "Could not create photo card "
-                    "from original article image."
+                error = (
+                    "Could not create photo "
+                    "card from original article image."
                 )
 
-            # =================================================
-            # 2. FACEBOOK
-            # =================================================
+                print(
+                    f"✗ FAILED\n{error}"
+                )
 
-            result = post_to_facebook(
-                card,
-                title,
-                article_url
-            )
+                save_error(
+                    news_id,
+                    error
+                )
 
-            # =================================================
-            # 3. POST ID
-            # =================================================
-
-            post_id = (
-                result.get("post_id")
-                or result.get("id")
-            )
+                continue
 
             print(
-                f"Facebook Post ID: {post_id}"
+                "Posting photo card to Facebook..."
             )
 
-            # =================================================
-            # 4. SUPABASE
-            # =================================================
-
-            mark_posted(
-                news_id,
-                post_id
+            post_id, error = (
+                post_to_facebook(
+                    card,
+                    title,
+                    article_url
+                )
             )
 
-            posted_count += 1
+            if post_id:
 
-            print(
-                "✓ COMPLETE"
-            )
+                print(
+                    "✓ Facebook post successful"
+                )
+
+                print(
+                    f"Facebook Post ID: "
+                    f"{post_id}"
+                )
+
+                mark_posted(
+                    news_id,
+                    post_id
+                )
+
+                posted_count += 1
+
+                print(
+                    "✓ COMPLETE"
+                )
+
+            else:
+
+                print(
+                    "✗ Facebook post failed"
+                )
+
+                print(
+                    f"Error: {error}"
+                )
+
+                save_error(
+                    news_id,
+                    error
+                )
 
         except Exception as e:
 
             print(
-                "\n✗ FAILED"
-            )
-
-            print(
-                str(e)
+                f"✗ FAILED\n{e}"
             )
 
             save_error(
@@ -1560,26 +1395,19 @@ def main():
                 e
             )
 
-    # =====================================================
-    # FINAL
-    # =====================================================
-
     print(
         "\n=========================================="
     )
 
     print(
-        f"Finished. Posted: {posted_count}"
+        f"Finished. Posted: "
+        f"{posted_count}"
     )
 
     print(
         "=========================================="
     )
 
-
-# =========================================================
-# RUN
-# =========================================================
 
 if __name__ == "__main__":
     main()
