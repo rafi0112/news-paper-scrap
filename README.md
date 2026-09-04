@@ -66,7 +66,7 @@ The Daily Star is still allowed to exist in the news database if the scraper col
 
 ## **2. Architecture**
 
-![System Architecture](architecture.png)
+![System Architecture](https://github.com/user-attachments/assets/8e3009d8-ccbf-4612-ab69-06346c34227b)
 
 ### **Main components**
 
