@@ -1,10 +1,11 @@
 import os
 import io
 import json
-import re
+import subprocess
 import requests
 
 from urllib.parse import urljoin
+
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
@@ -30,6 +31,7 @@ META_GRAPH_VERSION = os.getenv(
     "v25.0"
 )
 
+# Maximum Facebook posts per GitHub Actions run
 MAX_POSTS_PER_RUN = 3
 
 CARD_WIDTH = 1200
@@ -39,7 +41,7 @@ REQUEST_TIMEOUT = 25
 
 
 # ============================================================
-# VALIDATE ENVIRONMENT
+# ENVIRONMENT VALIDATION
 # ============================================================
 
 required = {
@@ -61,6 +63,10 @@ if missing:
         + ", ".join(missing)
     )
 
+
+# ============================================================
+# SUPABASE
+# ============================================================
 
 supabase: Client = create_client(
     SUPABASE_URL,
@@ -90,103 +96,175 @@ session.headers.update({
 
 
 # ============================================================
-# FONT
+# BENGALI FONT
 # ============================================================
 
 def get_font(size, bold=False):
+    """
+    Always use a Bengali-capable Noto font.
 
-    # IMPORTANT:
-    # Bengali fonts MUST come before DejaVu.
+    DejaVu Sans is intentionally NOT used as a fallback
+    because it can produce square boxes for Bengali text.
+    """
 
-    preferred = []
+    # --------------------------------------------------------
+    # 1. fontconfig
+    # --------------------------------------------------------
 
     if bold:
-        preferred.extend([
-            "/usr/share/fonts/truetype/noto/"
-            "NotoSansBengali-Bold.ttf",
 
-            "/usr/share/fonts/opentype/noto/"
-            "NotoSansBengali-Bold.ttf",
-
-            "/usr/share/fonts/truetype/noto/"
-            "NotoSansBengaliUI-Bold.ttf",
-        ])
+        queries = [
+            "Noto Sans Bengali:style=Bold",
+            "Noto Sans Bengali",
+            "Noto Sans Bengali UI:style=Bold",
+        ]
 
     else:
-        preferred.extend([
+
+        queries = [
+            "Noto Sans Bengali:style=Regular",
+            "Noto Sans Bengali",
+            "Noto Sans Bengali UI:style=Regular",
+        ]
+
+    for query in queries:
+
+        try:
+
+            result = subprocess.run(
+                [
+                    "fc-match",
+                    "-f",
+                    "%{file}",
+                    query
+                ],
+                capture_output=True,
+                text=True,
+                check=True
+            )
+
+            font_path = result.stdout.strip()
+
+            if (
+                font_path
+                and os.path.exists(font_path)
+                and "DejaVu" not in font_path
+            ):
+
+                print(
+                    f"Font: {font_path}"
+                )
+
+                return ImageFont.truetype(
+                    font_path,
+                    size
+                )
+
+        except Exception as e:
+
+            print(
+                f"Font lookup failed for "
+                f"{query}: {e}"
+            )
+
+    # --------------------------------------------------------
+    # 2. Direct Noto paths
+    # --------------------------------------------------------
+
+    if bold:
+
+        direct_paths = [
+            "/usr/share/fonts/truetype/noto/"
+            "NotoSansBengali-Bold.ttf",
+
+            "/usr/share/fonts/opentype/noto/"
+            "NotoSansBengali-Bold.ttf",
+
+            "/usr/local/share/fonts/"
+            "NotoSansBengali-Bold.ttf",
+        ]
+
+    else:
+
+        direct_paths = [
             "/usr/share/fonts/truetype/noto/"
             "NotoSansBengali-Regular.ttf",
 
             "/usr/share/fonts/opentype/noto/"
             "NotoSansBengali-Regular.ttf",
 
-            "/usr/share/fonts/truetype/noto/"
+            "/usr/local/share/fonts/"
+            "NotoSansBengali-Regular.ttf",
+        ]
+
+    for font_path in direct_paths:
+
+        if os.path.exists(font_path):
+
+            print(
+                f"Font: {font_path}"
+            )
+
+            return ImageFont.truetype(
+                font_path,
+                size
+            )
+
+    # --------------------------------------------------------
+    # 3. Recursive search
+    # --------------------------------------------------------
+
+    if bold:
+
+        wanted_names = [
+            "NotoSansBengali-Bold.ttf",
+            "NotoSansBengaliUI-Bold.ttf",
+        ]
+
+    else:
+
+        wanted_names = [
+            "NotoSansBengali-Regular.ttf",
             "NotoSansBengaliUI-Regular.ttf",
-        ])
+        ]
 
-    # Search preferred fonts first
-    for path in preferred:
-        if os.path.exists(path):
-            print(f"Font: {path}")
-            return ImageFont.truetype(path, size)
-
-    # Recursive search
-    search_dirs = [
+    for root in [
         "/usr/share/fonts",
         "/usr/local/share/fonts",
-    ]
+    ]:
 
-    patterns = []
-
-    if bold:
-        patterns = [
-            "NotoSansBengali-Bold.ttf",
-            "NotoSansBengaliUI-Bold.ttf",
-            "NotoSans-Bold.ttf",
-        ]
-    else:
-        patterns = [
-            "NotoSansBengali-Regular.ttf",
-            "NotoSansBengaliUI-Regular.ttf",
-            "NotoSans-Regular.ttf",
-        ]
-
-    for root in search_dirs:
+        if not os.path.exists(root):
+            continue
 
         for dirpath, _, filenames in os.walk(root):
 
             for filename in filenames:
 
-                if filename in patterns:
+                if filename in wanted_names:
 
-                    path = os.path.join(
+                    font_path = os.path.join(
                         dirpath,
                         filename
                     )
 
-                    print(f"Font: {path}")
+                    print(
+                        f"Font: {font_path}"
+                    )
 
                     return ImageFont.truetype(
-                        path,
+                        font_path,
                         size
                     )
 
-    # Final fallback
-    fallback = (
-        "/usr/share/fonts/truetype/dejavu/"
-        "DejaVuSans-Bold.ttf"
-        if bold
-        else
-        "/usr/share/fonts/truetype/dejavu/"
-        "DejaVuSans.ttf"
-    )
+    # --------------------------------------------------------
+    # IMPORTANT:
+    # Do NOT use DejaVu fallback.
+    # --------------------------------------------------------
 
-    print(f"WARNING: Bengali Noto font not found.")
-    print(f"Font fallback: {fallback}")
-
-    return ImageFont.truetype(
-        fallback,
-        size
+    raise RuntimeError(
+        "Noto Sans Bengali font was not found. "
+        "Install Bengali fonts before running "
+        "facebook_poster.py."
     )
 
 
@@ -220,7 +298,9 @@ def wrap_text(
             font=font
         )
 
-        width = bbox[2] - bbox[0]
+        width = (
+            bbox[2] - bbox[0]
+        )
 
         if width <= max_width:
 
@@ -229,12 +309,16 @@ def wrap_text(
         else:
 
             if current:
-                lines.append(current)
+                lines.append(
+                    current
+                )
 
             current = word
 
     if current:
-        lines.append(current)
+        lines.append(
+            current
+        )
 
     return lines
 
@@ -250,22 +334,39 @@ def is_generic_image(url):
 
     lower = url.lower()
 
-    # These are truly generic images.
+    # ONLY truly generic assets are rejected.
+    #
+    # IMPORTANT:
+    # Do NOT reject:
+    #
+    # /styles/social_share/
+    # share-image
+    #
+    # because TBS can use those paths for real
+    # article photographs.
+
     bad_patterns = [
+
         "banner.png",
         "banner.jpg",
         "banner.jpeg",
+
         "/logo.",
         "logo.png",
         "logo.jpg",
         "logo.jpeg",
+
         "default.jpg",
         "default.png",
         "default.jpeg",
+
         "placeholder",
+
         "og-default",
         "fallback",
+
         "avatar",
+
         "/icon.",
         "icon.png",
         "icon.jpg",
@@ -274,17 +375,8 @@ def is_generic_image(url):
     for pattern in bad_patterns:
 
         if pattern in lower:
-            return True
 
-    # IMPORTANT:
-    #
-    # DO NOT reject:
-    #
-    # social_share
-    # share-image
-    #
-    # because TBS can use /styles/social_share/
-    # for a real article photograph.
+            return True
 
     return False
 
@@ -300,7 +392,9 @@ def download_image(url):
 
     try:
 
-        print(f"Downloading image: {url}")
+        print(
+            f"Downloading image: {url}"
+        )
 
         response = session.get(
             url,
@@ -316,7 +410,6 @@ def download_image(url):
             .lower()
         )
 
-        # Make sure this is actually an image.
         if (
             not content_type.startswith("image/")
             and not url.lower().endswith(
@@ -338,7 +431,9 @@ def download_image(url):
             return None
 
         image = Image.open(
-            io.BytesIO(response.content)
+            io.BytesIO(
+                response.content
+            )
         )
 
         image.load()
@@ -360,7 +455,7 @@ def download_image(url):
 
 
 # ============================================================
-# ARTICLE IMAGE EXTRACTION
+# ARTICLE PAGE IMAGE EXTRACTION
 # ============================================================
 
 def extract_article_image(article_url):
@@ -388,7 +483,7 @@ def extract_article_image(article_url):
         )
 
         # ----------------------------------------------------
-        # 1. OG IMAGE
+        # 1. OpenGraph
         # ----------------------------------------------------
 
         og = soup.find(
@@ -396,14 +491,19 @@ def extract_article_image(article_url):
             property="og:image"
         )
 
-        if og and og.get("content"):
+        if (
+            og
+            and og.get("content")
+        ):
 
             image_url = urljoin(
                 article_url,
                 og["content"].strip()
             )
 
-            if not is_generic_image(image_url):
+            if not is_generic_image(
+                image_url
+            ):
 
                 print(
                     f"✓ Found og:image: "
@@ -413,7 +513,7 @@ def extract_article_image(article_url):
                 return image_url
 
         # ----------------------------------------------------
-        # 2. TWITTER IMAGE
+        # 2. Twitter image
         # ----------------------------------------------------
 
         twitter = soup.find(
@@ -423,14 +523,19 @@ def extract_article_image(article_url):
             }
         )
 
-        if twitter and twitter.get("content"):
+        if (
+            twitter
+            and twitter.get("content")
+        ):
 
             image_url = urljoin(
                 article_url,
                 twitter["content"].strip()
             )
 
-            if not is_generic_image(image_url):
+            if not is_generic_image(
+                image_url
+            ):
 
                 print(
                     f"✓ Found twitter:image: "
@@ -450,10 +555,15 @@ def extract_article_image(article_url):
 
             try:
 
-                data = json.loads(
-                    script.string or
-                    script.get_text()
+                raw = (
+                    script.string
+                    or script.get_text()
                 )
+
+                if not raw.strip():
+                    continue
+
+                data = json.loads(raw)
 
                 objects = (
                     data
@@ -469,8 +579,11 @@ def extract_article_image(article_url):
                     ):
                         continue
 
-                    image = obj.get("image")
+                    image = obj.get(
+                        "image"
+                    )
 
+                    # String
                     if isinstance(
                         image,
                         str
@@ -492,7 +605,8 @@ def extract_article_image(article_url):
 
                             return image_url
 
-                    if isinstance(
+                    # Dictionary
+                    elif isinstance(
                         image,
                         dict
                     ):
@@ -519,7 +633,8 @@ def extract_article_image(article_url):
 
                                 return image_url
 
-                    if isinstance(
+                    # List
+                    elif isinstance(
                         image,
                         list
                     ):
@@ -568,7 +683,7 @@ def extract_article_image(article_url):
 
 
 # ============================================================
-# RESOLVE IMAGE
+# RESOLVE ARTICLE IMAGE
 # ============================================================
 
 def resolve_article_image(
@@ -578,9 +693,9 @@ def resolve_article_image(
 
     # --------------------------------------------------------
     # FIRST:
-    # Try the stored image directly.
+    # Try the stored image.
     #
-    # This is the important fix for TBS.
+    # This is important for TBS.
     # --------------------------------------------------------
 
     if stored_image:
@@ -594,8 +709,8 @@ def resolve_article_image(
         ):
 
             print(
-                "Stored image appears to "
-                "be an article image."
+                "Stored image appears to be "
+                "an article image."
             )
 
             image = download_image(
@@ -610,9 +725,16 @@ def resolve_article_image(
                 "Stored image download failed."
             )
 
+        else:
+
+            print(
+                "⚠ Stored image looks like "
+                "banner/logo/default."
+            )
+
     # --------------------------------------------------------
     # SECOND:
-    # Try article-page metadata.
+    # Search article page.
     # --------------------------------------------------------
 
     actual_url = extract_article_image(
@@ -629,10 +751,6 @@ def resolve_article_image(
 
             return image
 
-    # --------------------------------------------------------
-    # Nothing worked.
-    # --------------------------------------------------------
-
     print(
         "✗ No usable article image found."
     )
@@ -641,7 +759,7 @@ def resolve_article_image(
 
 
 # ============================================================
-# CROP IMAGE TO SQUARE
+# CROP TO SQUARE
 # ============================================================
 
 def crop_to_square(image):
@@ -686,6 +804,24 @@ def create_photo_card(
 
     try:
 
+        # ----------------------------------------------------
+        # Force Bengali fonts BEFORE generating image.
+        # ----------------------------------------------------
+
+        source_font = get_font(
+            28,
+            bold=True
+        )
+
+        title_font = get_font(
+            58,
+            bold=True
+        )
+
+        # ----------------------------------------------------
+        # Prepare image
+        # ----------------------------------------------------
+
         image = crop_to_square(
             image
         )
@@ -699,7 +835,7 @@ def create_photo_card(
         )
 
         # ----------------------------------------------------
-        # Slight blur background layer
+        # Background
         # ----------------------------------------------------
 
         background = image.copy()
@@ -708,8 +844,7 @@ def create_photo_card(
             ImageFilter.GaussianBlur(8)
         )
 
-        # Darken background
-        overlay = Image.new(
+        dark_overlay = Image.new(
             "RGBA",
             background.size,
             (0, 0, 0, 65)
@@ -717,17 +852,14 @@ def create_photo_card(
 
         background = Image.alpha_composite(
             background.convert("RGBA"),
-            overlay
+            dark_overlay
         )
 
         card = background.convert(
             "RGBA"
         )
 
-        # ----------------------------------------------------
-        # Main image
-        # ----------------------------------------------------
-
+        # Original article image
         card.alpha_composite(
             image.convert("RGBA")
         )
@@ -736,20 +868,22 @@ def create_photo_card(
         # Top gradient
         # ----------------------------------------------------
 
-        gradient = Image.new(
+        top_gradient = Image.new(
             "RGBA",
             card.size,
             (0, 0, 0, 0)
         )
 
         gd = ImageDraw.Draw(
-            gradient
+            top_gradient
         )
 
         for y in range(500):
 
             alpha = int(
-                150 * (1 - y / 500)
+                150 * (
+                    1 - y / 500
+                )
             )
 
             gd.line(
@@ -767,21 +901,21 @@ def create_photo_card(
 
         card = Image.alpha_composite(
             card,
-            gradient
+            top_gradient
         )
 
         # ----------------------------------------------------
         # Bottom gradient
         # ----------------------------------------------------
 
-        gradient2 = Image.new(
+        bottom_gradient = Image.new(
             "RGBA",
             card.size,
             (0, 0, 0, 0)
         )
 
         gd2 = ImageDraw.Draw(
-            gradient2
+            bottom_gradient
         )
 
         start_y = 600
@@ -816,7 +950,7 @@ def create_photo_card(
 
         card = Image.alpha_composite(
             card,
-            gradient2
+            bottom_gradient
         )
 
         draw = ImageDraw.Draw(
@@ -824,13 +958,8 @@ def create_photo_card(
         )
 
         # ----------------------------------------------------
-        # Source badge
+        # SOURCE BADGE
         # ----------------------------------------------------
-
-        source_font = get_font(
-            28,
-            bold=True
-        )
 
         badge_text = source
 
@@ -885,13 +1014,8 @@ def create_photo_card(
         )
 
         # ----------------------------------------------------
-        # Title
+        # TITLE
         # ----------------------------------------------------
-
-        title_font = get_font(
-            58,
-            bold=True
-        )
 
         max_width = 1050
 
@@ -902,7 +1026,6 @@ def create_photo_card(
             max_width
         )
 
-        # Limit title height
         max_lines = 5
 
         if len(lines) > max_lines:
@@ -911,7 +1034,7 @@ def create_photo_card(
 
             last = lines[-1]
 
-            while True:
+            while last:
 
                 test = last + "..."
 
@@ -925,6 +1048,7 @@ def create_photo_card(
                     bbox[2] - bbox[0]
                     <= max_width
                 ):
+
                     lines[-1] = test
                     break
 
@@ -959,16 +1083,20 @@ def create_photo_card(
             - 90
         )
 
-        # Text shadow
+        # ----------------------------------------------------
+        # TITLE SHADOW + TEXT
+        # ----------------------------------------------------
+
         for line, height in zip(
             lines,
             heights
         ):
 
+            # Shadow
             draw.text(
                 (
-                    60 + 3,
-                    y + 3
+                    63,
+                    y + 4
                 ),
                 line,
                 font=title_font,
@@ -976,10 +1104,11 @@ def create_photo_card(
                     0,
                     0,
                     0,
-                    180
+                    190
                 )
             )
 
+            # White title
             draw.text(
                 (
                     60,
@@ -1001,12 +1130,14 @@ def create_photo_card(
             )
 
         # ----------------------------------------------------
-        # Export
+        # JPEG OUTPUT
         # ----------------------------------------------------
 
         output = io.BytesIO()
 
-        card.convert("RGB").save(
+        card.convert(
+            "RGB"
+        ).save(
             output,
             format="JPEG",
             quality=94,
@@ -1032,7 +1163,7 @@ def create_photo_card(
 
 
 # ============================================================
-# FACEBOOK POST
+# POST TO FACEBOOK
 # ============================================================
 
 def post_to_facebook(
@@ -1047,6 +1178,10 @@ def post_to_facebook(
         f"{FACEBOOK_PAGE_ID}/photos"
     )
 
+    # ONLY:
+    # Article title
+    # Article URL
+
     caption = (
         f"{title}\n\n"
         f"{article_url}"
@@ -1059,6 +1194,7 @@ def post_to_facebook(
             data={
                 "access_token":
                     FACEBOOK_PAGE_ACCESS_TOKEN,
+
                 "caption":
                     caption,
             },
@@ -1074,9 +1210,15 @@ def post_to_facebook(
 
         data = response.json()
 
-        if response.ok and data.get("id"):
+        if (
+            response.ok
+            and data.get("id")
+        ):
 
-            return data["id"], None
+            return (
+                data["id"],
+                None
+            )
 
         return (
             None,
@@ -1088,7 +1230,10 @@ def post_to_facebook(
 
     except Exception as e:
 
-        return None, str(e)
+        return (
+            None,
+            str(e)
+        )
 
 
 # ============================================================
@@ -1239,6 +1384,10 @@ def main():
         "Daily Star: SKIPPED"
     )
 
+    # --------------------------------------------------------
+    # Get news
+    # --------------------------------------------------------
+
     news = get_unposted_news()
 
     print(
@@ -1246,6 +1395,10 @@ def main():
     )
 
     posted_count = 0
+
+    # --------------------------------------------------------
+    # Process each article
+    # --------------------------------------------------------
 
     for article in news:
 
@@ -1288,6 +1441,10 @@ def main():
 
         try:
 
+            # ------------------------------------------------
+            # IMAGE
+            # ------------------------------------------------
+
             image = resolve_article_image(
                 stored_image,
                 article_url
@@ -1310,6 +1467,10 @@ def main():
                 )
 
                 continue
+
+            # ------------------------------------------------
+            # PHOTO CARD
+            # ------------------------------------------------
 
             card = create_photo_card(
                 image,
@@ -1334,6 +1495,10 @@ def main():
                 )
 
                 continue
+
+            # ------------------------------------------------
+            # FACEBOOK
+            # ------------------------------------------------
 
             print(
                 "Posting photo card to Facebook..."
@@ -1394,6 +1559,10 @@ def main():
                 news_id,
                 e
             )
+
+    # --------------------------------------------------------
+    # FINISHED
+    # --------------------------------------------------------
 
     print(
         "\n=========================================="
