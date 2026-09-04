@@ -1,12 +1,13 @@
 import os
 import io
 import json
-import math
 import subprocess
 import requests
 
+from datetime import datetime
 from urllib.parse import urljoin
-from PIL import Image, ImageDraw, ImageFont, ImageFilter, features
+import re
+from PIL import Image, ImageDraw, ImageFont, features
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 from supabase import create_client, Client
@@ -33,14 +34,56 @@ META_GRAPH_VERSION = os.getenv(
 
 MAX_POSTS_PER_RUN = 3
 
-CARD_WIDTH = 1200
-CARD_HEIGHT = 1200
-
 REQUEST_TIMEOUT = 25
 
-# Brand accent used across the photo-card design
-# (badge dot, headline rule, footer bar).
-ACCENT_COLOR = (196, 62, 44)
+# Maximum description/excerpt length in the Facebook caption.
+# This keeps the post concise instead of copying the full article.
+DESCRIPTION_MAX_CHARS = int(
+    os.getenv("DESCRIPTION_MAX_CHARS", "300")
+)
+
+# ------------------------------------------------------------
+# Card layout constants (the "photo card" look)
+# ------------------------------------------------------------
+
+CARD_WIDTH = 1200
+
+# The photo sits below the header, cropped to a square.
+PHOTO_SIZE = 1200
+
+SIDE_MARGIN = 64
+TOP_MARGIN = 56
+
+HEADLINE_FONT_SIZE = 56
+HEADLINE_LINE_SPACING = 12
+HEADLINE_MAX_LINES = 4
+
+# Vertical highlighter padding around the highlighted text
+HIGHLIGHT_PAD_X = 10
+HIGHLIGHT_PAD_TOP = 6
+HIGHLIGHT_PAD_BOTTOM = 12
+
+GAP_AFTER_HEADLINE = 22
+
+SOURCE_FONT_SIZE = 24
+GAP_AFTER_SOURCE = 34
+
+# Brand accent used for the headline highlight + logo mark.
+ACCENT_COLOR = (196, 44, 44)
+
+WHITE = (255, 255, 255)
+BLACK = (20, 20, 20)
+GRAY = (120, 120, 120)
+
+# Fraction of the headline (by word count) that gets the red
+# highlight treatment, read left-to-right from the first word.
+# Tune with HIGHLIGHT_WORD_RATIO in the environment if needed.
+HIGHLIGHT_WORD_RATIO = float(
+    os.getenv("HIGHLIGHT_WORD_RATIO", "0.65")
+)
+
+# Small watermark drawn in the bottom-right corner of the photo.
+BRAND_MARK = os.getenv("BRAND_MARK", "TN")
 
 
 # ============================================================
@@ -464,29 +507,34 @@ def draw_mixed_text(
 
 
 # ============================================================
-# WRAP MIXED TEXT
+# WRAP MIXED TEXT (word-aware, keeps word boundaries so we can
+# later figure out which words fall in the "highlighted" prefix)
 # ============================================================
 
-def wrap_text(
+def wrap_text_words(
     draw,
     text,
     bengali_font,
     latin_font,
     max_width
 ):
+    """
+    Same wrapping behaviour as before, but returns a list of
+    *word lists* (one list per line) instead of joined strings,
+    so the caller can re-associate each word with its global
+    index in the headline.
+    """
 
     words = text.split()
 
     lines = []
-    current = ""
+    current_words = []
 
     for word in words:
 
-        test = (
-            word
-            if not current
-            else current + " " + word
-        )
+        test_words = current_words + [word]
+
+        test = " ".join(test_words)
 
         width = mixed_text_width(
             draw,
@@ -495,25 +543,19 @@ def wrap_text(
             latin_font
         )
 
-        if width <= max_width:
+        if width <= max_width or not current_words:
 
-            current = test
+            current_words = test_words
 
         else:
 
-            if current:
+            lines.append(current_words)
 
-                lines.append(
-                    current
-                )
+            current_words = [word]
 
-            current = word
+    if current_words:
 
-    if current:
-
-        lines.append(
-            current
-        )
+        lines.append(current_words)
 
     return lines
 
@@ -638,6 +680,235 @@ def download_image(url):
         )
 
         return None
+
+
+# ============================================================
+# WEBSITE DESCRIPTION / SHORT EXCERPT
+# ============================================================
+
+def clean_description(text):
+    """
+    Clean a website description/excerpt and keep it short.
+    """
+
+    if not text:
+        return ""
+
+    text = re.sub(
+        r"\s+",
+        " ",
+        str(text)
+    ).strip()
+
+    text = text.strip(
+        " \t\r\n\"'“”‘’"
+    )
+
+    if not text:
+        return ""
+
+    if len(text) <= DESCRIPTION_MAX_CHARS:
+        return text
+
+    shortened = text[
+        :DESCRIPTION_MAX_CHARS
+    ].rsplit(" ", 1)[0].strip()
+
+    if not shortened:
+        shortened = text[
+            :DESCRIPTION_MAX_CHARS
+        ].strip()
+
+    return shortened + "…"
+
+
+def extract_website_description(article_url):
+    """
+    Extract a short description from the article page.
+
+    Priority:
+      1. meta[name='description']
+      2. og:description
+      3. twitter:description
+      4. first meaningful article paragraph
+    """
+
+    if not article_url:
+        return ""
+
+    try:
+
+        print(
+            "Opening article page to find "
+            "website description..."
+        )
+
+        response = session.get(
+            article_url,
+            timeout=REQUEST_TIMEOUT
+        )
+
+        response.raise_for_status()
+
+        soup = BeautifulSoup(
+            response.text,
+            "html.parser"
+        )
+
+        # ----------------------------------------------------
+        # Standard meta description
+        # ----------------------------------------------------
+
+        meta = soup.find(
+            "meta",
+            attrs={
+                "name": "description"
+            }
+        )
+
+        if meta and meta.get("content"):
+
+            description = clean_description(
+                meta["content"]
+            )
+
+            if description:
+
+                print(
+                    "✓ Website description found "
+                    "from meta description"
+                )
+
+                return description
+
+        # ----------------------------------------------------
+        # OpenGraph description
+        # ----------------------------------------------------
+
+        og = soup.find(
+            "meta",
+            property="og:description"
+        )
+
+        if og and og.get("content"):
+
+            description = clean_description(
+                og["content"]
+            )
+
+            if description:
+
+                print(
+                    "✓ Website description found "
+                    "from og:description"
+                )
+
+                return description
+
+        # ----------------------------------------------------
+        # Twitter description
+        # ----------------------------------------------------
+
+        twitter = soup.find(
+            "meta",
+            attrs={
+                "name": "twitter:description"
+            }
+        )
+
+        if twitter and twitter.get("content"):
+
+            description = clean_description(
+                twitter["content"]
+            )
+
+            if description:
+
+                print(
+                    "✓ Website description found "
+                    "from twitter:description"
+                )
+
+                return description
+
+        # ----------------------------------------------------
+        # Fallback: first meaningful article paragraph
+        # ----------------------------------------------------
+
+        selectors = [
+            "article p",
+            "[itemprop='articleBody'] p",
+            ".article-body p",
+            ".article-content p",
+            ".story-body p",
+            ".story-content p",
+            "main p",
+        ]
+
+        for selector in selectors:
+
+            for paragraph in soup.select(
+                selector
+            ):
+
+                text = paragraph.get_text(
+                    " ",
+                    strip=True
+                )
+
+                text = clean_description(
+                    text
+                )
+
+                # Ignore very short UI labels/captions.
+                if len(text) >= 40:
+
+                    print(
+                        "✓ Website description found "
+                        "from first article paragraph"
+                    )
+
+                    return text
+
+        print(
+            "⚠ No website description found."
+        )
+
+        return ""
+
+    except Exception as e:
+
+        print(
+            f"⚠ Description extraction failed: {e}"
+        )
+
+        return ""
+
+
+def get_article_description(
+    stored_description,
+    article_url
+):
+    """
+    Prefer the description already stored in Supabase.
+    If it is missing, fetch it from the article page.
+    """
+
+    description = clean_description(
+        stored_description
+    )
+
+    if description:
+
+        print(
+            f"Stored description: {description}"
+        )
+
+        return description
+
+    return extract_website_description(
+        article_url
+    )
 
 
 # ============================================================
@@ -972,564 +1243,377 @@ def crop_to_square(image):
 
 
 # ============================================================
-# VIGNETTE (soft corner darkening, no numpy required)
+# DATE FORMATTING
 # ============================================================
 
-def create_vignette(size, low_res=80, strength=120, inner=0.35):
-
-    small = Image.new("L", (low_res, low_res), 0)
-    pixels = small.load()
-
-    center = (low_res - 1) / 2
-    max_dist = math.hypot(center, center)
-
-    for yy in range(low_res):
-        for xx in range(low_res):
-
-            dist = math.hypot(xx - center, yy - center) / max_dist
-            eased = max(0.0, dist - inner) / (1 - inner)
-            eased = min(1.0, eased) ** 1.6
-
-            pixels[xx, yy] = int(strength * eased)
-
-    alpha = small.resize(size, Image.Resampling.BICUBIC)
-
-    vignette = Image.new("RGBA", size, (0, 0, 0, 255))
-    vignette.putalpha(alpha)
-
-    return vignette
-
-
-# ============================================================
-# FILM GRAIN (subtle, tactile texture)
-# ============================================================
-
-def create_grain_layer(size, opacity=9):
-
-    width, height = size
-
-    noise_bytes = os.urandom(width * height)
-    noise = Image.frombytes("L", (width, height), noise_bytes)
-
-    # Scale the random noise down to a low, even alpha range
-    # so the grain reads as texture, not visible speckling.
-    alpha = noise.point(lambda p: int(p * opacity / 255))
-
-    grain = Image.new("RGBA", size, (128, 128, 128, 255))
-    grain.putalpha(alpha)
-
-    return grain
-
-
-# ============================================================
-# GLASSMORPHISM BADGE PANEL
-# ============================================================
-
-def apply_glass_panel(
-    card,
-    box,
-    corner_radius=28,
-    blur_radius=24,
-    tint_alpha=150
-):
+def format_display_date(published_at):
     """
-    Frosted-glass badge: blurs whatever sits behind the badge,
-    tints it translucent white, then adds a soft edge highlight —
-    a modern 'glassmorphism' panel instead of a flat rectangle.
+    Turns a Supabase timestamp (ISO 8601, e.g.
+    '2026-09-03T10:15:00+00:00') into the display form used on
+    the card, e.g. '3 SEPTEMBER 2026'.
 
-    Mutates `card` in place.
+    Falls back to today's date if parsing fails or the value is
+    missing.
     """
 
-    x0, y0, x1, y1 = box
-    box_w = x1 - x0
-    box_h = y1 - y0
+    dt = None
 
-    region = card.crop(box).convert("RGB")
-    region = region.filter(ImageFilter.GaussianBlur(blur_radius))
-    region = region.convert("RGBA")
+    if published_at:
 
-    tint = Image.new("RGBA", region.size, (255, 255, 255, tint_alpha))
-    region = Image.alpha_composite(region, tint)
+        try:
 
-    mask = Image.new("L", region.size, 0)
-    mask_draw = ImageDraw.Draw(mask)
-    mask_draw.rounded_rectangle(
-        (0, 0, box_w - 1, box_h - 1),
-        radius=corner_radius,
-        fill=255
-    )
+            cleaned = published_at.replace("Z", "+00:00")
+            dt = datetime.fromisoformat(cleaned)
 
-    card.paste(region, (x0, y0), mask)
+        except Exception:
 
-    edge = ImageDraw.Draw(card)
-    edge.rounded_rectangle(
-        box,
-        radius=corner_radius,
-        outline=(255, 255, 255, 200),
-        width=2
-    )
+            dt = None
+
+    if dt is None:
+        dt = datetime.utcnow()
+
+    return f"{dt.day} {dt.strftime('%B %Y')}".upper()
 
 
 # ============================================================
-# CORNER BRACKETS (cinematic framing accent)
+# HEADLINE HIGHLIGHT SPLIT
 # ============================================================
 
-def draw_corner_brackets(
+def build_highlight_flags(total_words, ratio):
+    """
+    Returns the number of leading words (out of total_words)
+    that should get the red-highlight treatment.
+    """
+
+    if total_words <= 0:
+        return 0
+
+    count = round(total_words * ratio)
+
+    return max(1, min(total_words, count))
+
+
+# ============================================================
+# DRAW ONE HEADLINE LINE (mixes highlighted + plain segments)
+# ============================================================
+
+def draw_headline_line(
     draw,
-    size,
-    margin=44,
-    length=54,
-    width=3,
-    color=(255, 255, 255, 190),
-    corners=("top-right", "bottom-left", "bottom-right")
+    words,
+    global_start_index,
+    highlight_count,
+    x,
+    y,
+    line_height,
+    bengali_font,
+    latin_font
 ):
     """
-    Slim viewfinder-style corner brackets. The top-left corner is
-    skipped by default since the source badge lives there.
+    Draws a single wrapped headline line, switching between a
+    red-highlighted run (white text on a red box) and plain
+    black text, based on each word's position in the overall
+    headline.
     """
 
-    w, h = size
+    space_width = mixed_text_width(
+        draw, " ", bengali_font, latin_font
+    ) or 12
 
-    positions = {
-        "top-left": (margin, margin, 1, 1),
-        "top-right": (w - margin, margin, -1, 1),
-        "bottom-left": (margin, h - margin, 1, -1),
-        "bottom-right": (w - margin, h - margin, -1, -1),
-    }
+    # Group consecutive words that share the same highlight
+    # state into segments so each segment is drawn (and boxed)
+    # as one continuous run.
+    segments = []
 
-    for key in corners:
+    for i, word in enumerate(words):
 
-        x, y, dx, dy = positions[key]
-
-        draw.line(
-            [(x, y), (x + dx * length, y)],
-            fill=color,
-            width=width
+        is_highlighted = (
+            (global_start_index + i) < highlight_count
         )
 
-        draw.line(
-            [(x, y), (x, y + dy * length)],
-            fill=color,
-            width=width
+        if segments and segments[-1][0] == is_highlighted:
+
+            segments[-1][1].append(word)
+
+        else:
+
+            segments.append([is_highlighted, [word]])
+
+    cursor_x = x
+
+    for is_highlighted, seg_words in segments:
+
+        seg_text = " ".join(seg_words)
+
+        seg_width = mixed_text_width(
+            draw, seg_text, bengali_font, latin_font
         )
+
+        if is_highlighted:
+
+            draw.rectangle(
+                (
+                    cursor_x - HIGHLIGHT_PAD_X,
+                    y - HIGHLIGHT_PAD_TOP,
+                    cursor_x + seg_width + HIGHLIGHT_PAD_X,
+                    y + line_height + HIGHLIGHT_PAD_BOTTOM,
+                ),
+                fill=ACCENT_COLOR,
+            )
+
+            text_color = WHITE
+
+        else:
+
+            text_color = BLACK
+
+        draw_mixed_text(
+            draw,
+            (cursor_x, y),
+            seg_text,
+            bengali_font,
+            latin_font,
+            text_color,
+        )
+
+        cursor_x += seg_width + space_width
 
 
 # ============================================================
-# CREATE MODERN PHOTO CARD
+# CREATE PHOTO CARD (white header + red-highlight headline
+# + source/date line + plain square photo + logo mark)
 # ============================================================
 
 def create_photo_card(
     image,
     title,
-    source
+    source,
+    published_at=None
 ):
     """
-    Builds a premium, modern photo-card for Facebook:
+    Builds a clean "news card" for Facebook:
 
-      original article photo
+      white header with a bold black headline
+      (leading portion highlighted in red, white text)
               +
-      soft corner vignette
+      small gray SOURCE | DATE line
               +
-      cinematic corner brackets
-              +
-      frosted-glass source badge
-              +
-      accent rule + soft-shadow headline
-              +
-      brand-accent footer bar
-              +
-      subtle film grain
+      the original article photo, uncropped of any filters,
+      with a small brand mark in the bottom-right corner
 
-    Same inputs/outputs as before — a 1200x1200 JPEG in a
-    BytesIO buffer, or None on failure.
+    Returns a JPEG in a BytesIO buffer, or None on failure.
     """
 
     try:
 
         # ----------------------------------------------------
-        # Load BOTH font families.
+        # Fonts
         # ----------------------------------------------------
 
-        title_bengali_font = get_font(
-            60,
-            bold=True,
-            bengali=True
+        headline_bengali_font = get_font(
+            HEADLINE_FONT_SIZE, bold=True, bengali=True
         )
 
-        title_latin_font = get_font(
-            60,
-            bold=True,
-            bengali=False
+        headline_latin_font = get_font(
+            HEADLINE_FONT_SIZE, bold=True, bengali=False
         )
 
         source_bengali_font = get_font(
-            27,
-            bold=True,
-            bengali=True
+            SOURCE_FONT_SIZE, bold=True, bengali=True
         )
 
         source_latin_font = get_font(
-            27,
-            bold=True,
-            bengali=False
+            SOURCE_FONT_SIZE, bold=True, bengali=False
+        )
+
+        logo_font = get_font(
+            40, bold=True, bengali=False
         )
 
         # ----------------------------------------------------
-        # Prepare the original article photo
+        # Measuring canvas (used only to compute wrapping /
+        # text sizes before we know the final header height)
         # ----------------------------------------------------
 
-        image = crop_to_square(
-            image
-        )
+        measure_img = Image.new("RGB", (CARD_WIDTH, 10), WHITE)
+        measure_draw = ImageDraw.Draw(measure_img)
 
-        image = image.resize(
-            (
-                CARD_WIDTH,
-                CARD_HEIGHT
-            ),
-            Image.Resampling.LANCZOS
-        )
-
-        card = image.convert("RGBA")
+        max_text_width = CARD_WIDTH - (2 * SIDE_MARGIN)
 
         # ----------------------------------------------------
-        # Vignette — soft darkening toward the corners
+        # Wrap the headline into lines of words, then figure
+        # out how many of the total words get highlighted.
         # ----------------------------------------------------
 
-        vignette = create_vignette(
-            (CARD_WIDTH, CARD_HEIGHT),
-            strength=120
+        line_word_lists = wrap_text_words(
+            measure_draw,
+            title,
+            headline_bengali_font,
+            headline_latin_font,
+            max_text_width,
         )
 
-        card = Image.alpha_composite(
-            card,
-            vignette
+        truncated = False
+
+        if len(line_word_lists) > HEADLINE_MAX_LINES:
+
+            line_word_lists = line_word_lists[:HEADLINE_MAX_LINES]
+            truncated = True
+
+        if truncated and line_word_lists:
+
+            last_line = line_word_lists[-1]
+
+            if last_line:
+                last_line[-1] = last_line[-1] + "..."
+
+        total_words = sum(
+            len(words) for words in line_word_lists
         )
 
-        # ----------------------------------------------------
-        # Top gradient — protects the source badge
-        # ----------------------------------------------------
-
-        top_gradient = Image.new(
-            "RGBA",
-            card.size,
-            (0, 0, 0, 0)
+        highlight_count = build_highlight_flags(
+            total_words, HIGHLIGHT_WORD_RATIO
         )
 
-        gd = ImageDraw.Draw(
-            top_gradient
-        )
-
-        for y in range(420):
-
-            alpha = int(
-                130 * (1 - y / 420) ** 1.3
+        line_heights = [
+            mixed_text_height(
+                measure_draw,
+                " ".join(words),
+                headline_bengali_font,
+                headline_latin_font,
             )
+            for words in line_word_lists
+        ]
 
-            gd.line(
-                [
-                    (0, y),
-                    (CARD_WIDTH, y)
-                ],
-                fill=(10, 8, 8, alpha)
-            )
-
-        card = Image.alpha_composite(
-            card,
-            top_gradient
+        headline_block_height = (
+            sum(line_heights)
+            + HEADLINE_LINE_SPACING * (len(line_word_lists) - 1)
         )
 
-        # ----------------------------------------------------
-        # Bottom gradient — protects the title
-        # ----------------------------------------------------
+        source_text = (source or "").strip().upper()
 
-        bottom_gradient = Image.new(
-            "RGBA",
-            card.size,
-            (0, 0, 0, 0)
-        )
+        date_text = format_display_date(published_at)
 
-        gd2 = ImageDraw.Draw(
-            bottom_gradient
-        )
+        source_line = f"SOURCE: {source_text} | DATE: {date_text}"
 
-        start_y = 560
-
-        for y in range(
-            start_y,
-            CARD_HEIGHT
-        ):
-
-            progress = (
-                y - start_y
-            ) / (
-                CARD_HEIGHT - start_y
-            )
-
-            alpha = int(
-                25 + 218 * (progress ** 1.15)
-            )
-
-            gd2.line(
-                [
-                    (0, y),
-                    (CARD_WIDTH, y)
-                ],
-                fill=(8, 6, 6, alpha)
-            )
-
-        card = Image.alpha_composite(
-            card,
-            bottom_gradient
-        )
-
-        draw = ImageDraw.Draw(
-            card
-        )
-
-        # ----------------------------------------------------
-        # CORNER BRACKETS
-        # ----------------------------------------------------
-
-        draw_corner_brackets(
-            draw,
-            card.size
-        )
-
-        # ----------------------------------------------------
-        # SOURCE BADGE — frosted glass pill + accent dot
-        # ----------------------------------------------------
-
-        badge_text = source
-
-        text_width = mixed_text_width(
-            draw,
-            badge_text,
+        source_line_height = mixed_text_height(
+            measure_draw,
+            source_line,
             source_bengali_font,
-            source_latin_font
+            source_latin_font,
         )
 
-        badge_x = 56
-        badge_y = 56
+        # ----------------------------------------------------
+        # Compute total header height, then final card height
+        # ----------------------------------------------------
 
-        left_pad = 24
-        dot_diameter = 12
-        text_gap = 14
-        right_pad = 26
-
-        badge_width = (
-            left_pad
-            + dot_diameter
-            + text_gap
-            + text_width
-            + right_pad
+        header_height = (
+            TOP_MARGIN
+            + headline_block_height
+            + GAP_AFTER_HEADLINE
+            + source_line_height
+            + GAP_AFTER_SOURCE
         )
 
-        badge_height = 58
+        card_height = header_height + PHOTO_SIZE
 
-        badge_box = (
-            badge_x,
-            badge_y,
-            badge_x + badge_width,
-            badge_y + badge_height,
+        # ----------------------------------------------------
+        # Build the actual card
+        # ----------------------------------------------------
+
+        card = Image.new(
+            "RGB", (CARD_WIDTH, int(card_height)), WHITE
         )
 
-        apply_glass_panel(
-            card,
-            badge_box,
-            corner_radius=29,
-            blur_radius=26,
-            tint_alpha=150
-        )
+        draw = ImageDraw.Draw(card)
 
-        draw = ImageDraw.Draw(card)  # rebind after paste
+        # ----------------------------------------------------
+        # Headline
+        # ----------------------------------------------------
 
-        dot_radius = dot_diameter // 2
-        dot_cx = badge_x + left_pad + dot_radius
-        dot_cy = badge_y + badge_height // 2
+        y = TOP_MARGIN
+        global_index = 0
 
-        draw.ellipse(
-            (
-                dot_cx - dot_radius, dot_cy - dot_radius,
-                dot_cx + dot_radius, dot_cy + dot_radius,
-            ),
-            fill=ACCENT_COLOR,
-        )
+        for words, height in zip(line_word_lists, line_heights):
+
+            draw_headline_line(
+                draw,
+                words,
+                global_index,
+                highlight_count,
+                SIDE_MARGIN,
+                y,
+                height,
+                headline_bengali_font,
+                headline_latin_font,
+            )
+
+            global_index += len(words)
+            y += height + HEADLINE_LINE_SPACING
+
+        # ----------------------------------------------------
+        # Source / date line
+        # ----------------------------------------------------
+
+        y += GAP_AFTER_HEADLINE - HEADLINE_LINE_SPACING
 
         draw_mixed_text(
             draw,
-            (
-                badge_x + left_pad + dot_diameter + text_gap,
-                badge_y + 15
-            ),
-            badge_text,
+            (SIDE_MARGIN, y),
+            source_line,
             source_bengali_font,
             source_latin_font,
-            (25, 22, 20, 255),
+            GRAY,
         )
 
         # ----------------------------------------------------
-        # TITLE WRAPPING
+        # Photo — plain, edge-to-edge, no filters
         # ----------------------------------------------------
 
-        max_width = 1060
+        photo = crop_to_square(image)
 
-        lines = wrap_text(
-            draw,
-            title,
-            title_bengali_font,
-            title_latin_font,
-            max_width
+        photo = photo.resize(
+            (PHOTO_SIZE, PHOTO_SIZE),
+            Image.Resampling.LANCZOS,
         )
 
-        max_lines = 5
+        photo_y = int(header_height)
 
-        if len(lines) > max_lines:
+        card.paste(photo, (0, photo_y))
 
-            lines = lines[:max_lines]
-
-            last = lines[-1]
-
-            while last:
-
-                test = last + "..."
-
-                width = mixed_text_width(
-                    draw,
-                    test,
-                    title_bengali_font,
-                    title_latin_font
-                )
-
-                if width <= max_width:
-
-                    lines[-1] = test
-
-                    break
-
-                last = last[:-1]
+        draw = ImageDraw.Draw(card)  # rebind after paste
 
         # ----------------------------------------------------
-        # TITLE HEIGHT
+        # Brand mark — small badge, bottom-right of the photo
         # ----------------------------------------------------
 
-        line_spacing = 14
+        mark_text = BRAND_MARK
 
-        heights = []
+        mark_width = draw.textbbox(
+            (0, 0), mark_text, font=logo_font
+        )
+        mark_w = mark_width[2] - mark_width[0]
+        mark_h = mark_width[3] - mark_width[1]
 
-        for line in lines:
+        mark_margin = 30
+        mark_pad_x = 18
+        mark_pad_y = 12
 
-            height = mixed_text_height(
-                draw,
-                line,
-                title_bengali_font,
-                title_latin_font
-            )
+        badge_x1 = CARD_WIDTH - mark_margin
+        badge_y1 = photo_y + PHOTO_SIZE - mark_margin
+        badge_x0 = badge_x1 - mark_w - (2 * mark_pad_x)
+        badge_y0 = badge_y1 - mark_h - (2 * mark_pad_y)
 
-            heights.append(
-                height
-            )
-
-        total_height = (
-            sum(heights)
-            + line_spacing * (
-                len(lines) - 1
-            )
+        draw.rounded_rectangle(
+            (badge_x0, badge_y0, badge_x1, badge_y1),
+            radius=10,
+            fill=(0, 0, 0, 140),
         )
 
-        title_top = (
-            CARD_HEIGHT
-            - total_height
-            - 96
-        )
-
-        # ----------------------------------------------------
-        # ACCENT RULE ABOVE THE HEADLINE
-        # ----------------------------------------------------
-
-        rule_y = title_top - 30
-
-        draw.rectangle(
-            (60, rule_y, 60 + 64, rule_y + 4),
-            fill=ACCENT_COLOR,
-        )
-
-        # ----------------------------------------------------
-        # TITLE — soft blurred shadow, then crisp text on top
-        # ----------------------------------------------------
-
-        shadow_layer = Image.new(
-            "RGBA",
-            card.size,
-            (0, 0, 0, 0)
-        )
-
-        shadow_draw = ImageDraw.Draw(
-            shadow_layer
-        )
-
-        y = title_top
-
-        for line, height in zip(lines, heights):
-
-            draw_mixed_text(
-                shadow_draw,
-                (60, y + 5),
-                line,
-                title_bengali_font,
-                title_latin_font,
-                (0, 0, 0, 210),
-            )
-
-            y += height + line_spacing
-
-        shadow_layer = shadow_layer.filter(
-            ImageFilter.GaussianBlur(7)
-        )
-
-        card = Image.alpha_composite(
-            card,
-            shadow_layer
-        )
-
-        draw = ImageDraw.Draw(card)  # rebind after composite
-
-        y = title_top
-
-        for line, height in zip(lines, heights):
-
-            draw_mixed_text(
-                draw,
-                (60, y),
-                line,
-                title_bengali_font,
-                title_latin_font,
-                (255, 255, 255, 255),
-            )
-
-            y += height + line_spacing
-
-        # ----------------------------------------------------
-        # FOOTER ACCENT BAR
-        # ----------------------------------------------------
-
-        draw.rectangle(
-            (0, CARD_HEIGHT - 9, CARD_WIDTH, CARD_HEIGHT),
-            fill=ACCENT_COLOR,
-        )
-
-        # ----------------------------------------------------
-        # FILM GRAIN — subtle, premium print-like texture
-        # ----------------------------------------------------
-
-        grain = create_grain_layer(
-            card.size,
-            opacity=9
-        )
-
-        card = Image.alpha_composite(
-            card,
-            grain
+        draw.text(
+            (badge_x0 + mark_pad_x, badge_y0 + mark_pad_y),
+            mark_text,
+            font=logo_font,
+            fill=WHITE,
         )
 
         # ----------------------------------------------------
@@ -1538,19 +1622,17 @@ def create_photo_card(
 
         output = io.BytesIO()
 
-        card.convert(
-            "RGB"
-        ).save(
+        card.save(
             output,
             format="JPEG",
             quality=95,
-            optimize=True
+            optimize=True,
         )
 
         output.seek(0)
 
         print(
-            "✓ Modern photo card created"
+            "✓ Photo card created"
         )
 
         return output
@@ -1572,6 +1654,7 @@ def create_photo_card(
 def post_to_facebook(
     photo_bytes,
     title,
+    description,
     article_url
 ):
 
@@ -1581,10 +1664,23 @@ def post_to_facebook(
         f"{FACEBOOK_PAGE_ID}/photos"
     )
 
-    # ONLY title + article URL.
-    caption = (
-        f"{title}\n\n"
-        f"{article_url}"
+    # Facebook caption:
+    # exact title + short website description + article URL.
+    caption_parts = [
+        title.strip()
+    ]
+
+    if description:
+        caption_parts.append(
+            description.strip()
+        )
+
+    caption_parts.append(
+        article_url.strip()
+    )
+
+    caption = "\n\n".join(
+        caption_parts
     )
 
     try:
@@ -1646,7 +1742,7 @@ def get_unposted_news():
         supabase
         .table("news")
         .select(
-            "id,title,source,image,url"
+            "id,title,source,image,url,description,published_at"
         )
         .eq(
             "facebook_posted",
@@ -1829,6 +1925,15 @@ def main():
             article.get("image")
         )
 
+        published_at = (
+            article.get("published_at")
+        )
+
+        stored_description = (
+            article.get("description")
+            or ""
+        )
+
         print(
             f"Processing: {title}"
         )
@@ -1842,6 +1947,24 @@ def main():
         )
 
         try:
+
+            # ------------------------------------------------
+            # WEBSITE DESCRIPTION
+            # ------------------------------------------------
+
+            description = get_article_description(
+                stored_description,
+                article_url
+            )
+
+            if description:
+                print(
+                    f"✓ Description ready: {description}"
+                )
+            else:
+                print(
+                    "⚠ No description will be added."
+                )
 
             # ------------------------------------------------
             # IMAGE
@@ -1877,7 +2000,8 @@ def main():
             card = create_photo_card(
                 image,
                 title,
-                source
+                source,
+                published_at
             )
 
             if card is None:
@@ -1910,6 +2034,7 @@ def main():
                 post_to_facebook(
                     card,
                     title,
+                    description,
                     article_url
                 )
             )
