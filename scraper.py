@@ -1,12 +1,16 @@
 import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import json
 import re
 
 from database import init_db, save_news
 
+
+# ==========================================
+# NEWS SITES
+# ==========================================
 
 SITES = [
     {
@@ -28,6 +32,10 @@ SITES = [
 ]
 
 
+# ==========================================
+# REQUEST HEADERS
+# ==========================================
+
 HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -37,6 +45,10 @@ HEADERS = {
     )
 }
 
+
+# ==========================================
+# GET WEB PAGE
+# ==========================================
 
 def get_page(url):
 
@@ -220,6 +232,7 @@ def extract_published_date(soup):
                 value
             )
 
+
             if parsed:
 
                 return parsed
@@ -241,7 +254,10 @@ def parse_date(value):
     value = value.strip()
 
 
+    # --------------------------------------
     # ISO 8601
+    # --------------------------------------
+
     try:
 
         value_clean = value.replace(
@@ -253,19 +269,25 @@ def parse_date(value):
             value_clean
         )
 
+
         if dt.tzinfo is None:
 
             dt = dt.replace(
                 tzinfo=timezone.utc
             )
 
+
         return dt.isoformat()
 
     except ValueError:
+
         pass
 
 
+    # --------------------------------------
     # Common formats
+    # --------------------------------------
+
     formats = [
 
         "%Y-%m-%d %H:%M:%S",
@@ -294,9 +316,11 @@ def parse_date(value):
                 fmt
             )
 
+
             dt = dt.replace(
                 tzinfo=timezone.utc
             )
+
 
             return dt.isoformat()
 
@@ -306,6 +330,63 @@ def parse_date(value):
 
 
     return None
+
+
+# ==========================================
+# CHECK NEWS AGE
+# ==========================================
+
+def is_recent_news(published_at):
+
+    """
+    Return True only if the article was published
+    within the last 2 days.
+    """
+
+    if not published_at:
+        return False
+
+
+    try:
+
+        article_date = datetime.fromisoformat(
+            published_at.replace(
+                "Z",
+                "+00:00"
+            )
+        )
+
+
+        if article_date.tzinfo is None:
+
+            article_date = article_date.replace(
+                tzinfo=timezone.utc
+            )
+
+
+        now = datetime.now(
+            timezone.utc
+        )
+
+
+        cutoff = now - timedelta(
+            days=2
+        )
+
+
+        return article_date >= cutoff
+
+
+    except Exception as e:
+
+        print(
+            "Date validation failed:",
+            published_at
+        )
+
+        print(e)
+
+        return False
 
 
 # ==========================================
@@ -436,7 +517,7 @@ def extract_article(url, source):
 
 
     # --------------------------------------
-    # VALIDATE
+    # VALIDATE TITLE
     # --------------------------------------
 
     if not title:
@@ -444,11 +525,55 @@ def extract_article(url, source):
         return None
 
 
+    # --------------------------------------
     # IMPORTANT:
-    # If actual published time is not found,
-    # don't use current time.
-    #
-    # Use None instead.
+    # SKIP ARTICLES WITHOUT DATE
+    # --------------------------------------
+
+    if not published_at:
+
+        print(
+            "Skipping article: "
+            "publication date not found."
+        )
+
+        print(
+            "TITLE:",
+            title.strip()
+        )
+
+        return None
+
+
+    # --------------------------------------
+    # IMPORTANT:
+    # SKIP ARTICLES OLDER THAN 2 DAYS
+    # --------------------------------------
+
+    if not is_recent_news(
+        published_at
+    ):
+
+        print(
+            "\n[SKIP - OLDER THAN 2 DAYS]"
+        )
+
+        print(
+            "TITLE:",
+            title.strip()
+        )
+
+        print(
+            "DATE:",
+            published_at
+        )
+
+        return None
+
+
+    # --------------------------------------
+    # RETURN ARTICLE
+    # --------------------------------------
 
     return {
 
@@ -478,6 +603,7 @@ def get_article_links(site):
     html = get_page(
         site["url"]
     )
+
 
     if not html:
 
@@ -526,14 +652,18 @@ def get_article_links(site):
         )
 
 
+        # --------------------------------------
         # Same domain only
+        # --------------------------------------
 
         if parsed.netloc != domain:
 
             continue
 
 
+        # --------------------------------------
         # Ignore duplicate
+        # --------------------------------------
 
         if url in seen:
 
@@ -546,7 +676,9 @@ def get_article_links(site):
         )
 
 
+        # --------------------------------------
         # Ignore navigation links
+        # --------------------------------------
 
         if len(title) < 20:
 
@@ -568,9 +700,18 @@ def get_article_links(site):
 def scrape_site(site):
 
     print()
-    print("=" * 70)
-    print(site["name"])
-    print("=" * 70)
+
+    print(
+        "=" * 70
+    )
+
+    print(
+        site["name"]
+    )
+
+    print(
+        "=" * 70
+    )
 
 
     links = get_article_links(
@@ -586,6 +727,10 @@ def scrape_site(site):
 
     new_count = 0
 
+
+    # --------------------------------------
+    # Check maximum 20 links
+    # --------------------------------------
 
     for url in links[:20]:
 
@@ -614,20 +759,24 @@ def scrape_site(site):
                 "\n[NEW]"
             )
 
+
             print(
                 "TITLE:",
                 article["title"]
             )
+
 
             print(
                 "DATE:",
                 article["published_at"]
             )
 
+
             print(
                 "IMAGE:",
                 article["image"]
             )
+
 
             print(
                 "URL:",
@@ -641,7 +790,7 @@ def scrape_site(site):
 
 
 # ==========================================
-# SCRAPE ALL
+# SCRAPE ALL SITES
 # ==========================================
 
 def scrape_all():
