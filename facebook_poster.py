@@ -1,6 +1,7 @@
 import os
 import io
 import json
+import math
 import subprocess
 import requests
 
@@ -36,6 +37,10 @@ CARD_WIDTH = 1200
 CARD_HEIGHT = 1200
 
 REQUEST_TIMEOUT = 25
+
+# Brand accent used across the photo-card design
+# (badge dot, headline rule, footer bar).
+ACCENT_COLOR = (196, 62, 44)
 
 
 # ============================================================
@@ -967,6 +972,149 @@ def crop_to_square(image):
 
 
 # ============================================================
+# VIGNETTE (soft corner darkening, no numpy required)
+# ============================================================
+
+def create_vignette(size, low_res=80, strength=120, inner=0.35):
+
+    small = Image.new("L", (low_res, low_res), 0)
+    pixels = small.load()
+
+    center = (low_res - 1) / 2
+    max_dist = math.hypot(center, center)
+
+    for yy in range(low_res):
+        for xx in range(low_res):
+
+            dist = math.hypot(xx - center, yy - center) / max_dist
+            eased = max(0.0, dist - inner) / (1 - inner)
+            eased = min(1.0, eased) ** 1.6
+
+            pixels[xx, yy] = int(strength * eased)
+
+    alpha = small.resize(size, Image.Resampling.BICUBIC)
+
+    vignette = Image.new("RGBA", size, (0, 0, 0, 255))
+    vignette.putalpha(alpha)
+
+    return vignette
+
+
+# ============================================================
+# FILM GRAIN (subtle, tactile texture)
+# ============================================================
+
+def create_grain_layer(size, opacity=9):
+
+    width, height = size
+
+    noise_bytes = os.urandom(width * height)
+    noise = Image.frombytes("L", (width, height), noise_bytes)
+
+    # Scale the random noise down to a low, even alpha range
+    # so the grain reads as texture, not visible speckling.
+    alpha = noise.point(lambda p: int(p * opacity / 255))
+
+    grain = Image.new("RGBA", size, (128, 128, 128, 255))
+    grain.putalpha(alpha)
+
+    return grain
+
+
+# ============================================================
+# GLASSMORPHISM BADGE PANEL
+# ============================================================
+
+def apply_glass_panel(
+    card,
+    box,
+    corner_radius=28,
+    blur_radius=24,
+    tint_alpha=150
+):
+    """
+    Frosted-glass badge: blurs whatever sits behind the badge,
+    tints it translucent white, then adds a soft edge highlight —
+    a modern 'glassmorphism' panel instead of a flat rectangle.
+
+    Mutates `card` in place.
+    """
+
+    x0, y0, x1, y1 = box
+    box_w = x1 - x0
+    box_h = y1 - y0
+
+    region = card.crop(box).convert("RGB")
+    region = region.filter(ImageFilter.GaussianBlur(blur_radius))
+    region = region.convert("RGBA")
+
+    tint = Image.new("RGBA", region.size, (255, 255, 255, tint_alpha))
+    region = Image.alpha_composite(region, tint)
+
+    mask = Image.new("L", region.size, 0)
+    mask_draw = ImageDraw.Draw(mask)
+    mask_draw.rounded_rectangle(
+        (0, 0, box_w - 1, box_h - 1),
+        radius=corner_radius,
+        fill=255
+    )
+
+    card.paste(region, (x0, y0), mask)
+
+    edge = ImageDraw.Draw(card)
+    edge.rounded_rectangle(
+        box,
+        radius=corner_radius,
+        outline=(255, 255, 255, 200),
+        width=2
+    )
+
+
+# ============================================================
+# CORNER BRACKETS (cinematic framing accent)
+# ============================================================
+
+def draw_corner_brackets(
+    draw,
+    size,
+    margin=44,
+    length=54,
+    width=3,
+    color=(255, 255, 255, 190),
+    corners=("top-right", "bottom-left", "bottom-right")
+):
+    """
+    Slim viewfinder-style corner brackets. The top-left corner is
+    skipped by default since the source badge lives there.
+    """
+
+    w, h = size
+
+    positions = {
+        "top-left": (margin, margin, 1, 1),
+        "top-right": (w - margin, margin, -1, 1),
+        "bottom-left": (margin, h - margin, 1, -1),
+        "bottom-right": (w - margin, h - margin, -1, -1),
+    }
+
+    for key in corners:
+
+        x, y, dx, dy = positions[key]
+
+        draw.line(
+            [(x, y), (x + dx * length, y)],
+            fill=color,
+            width=width
+        )
+
+        draw.line(
+            [(x, y), (x, y + dy * length)],
+            fill=color,
+            width=width
+        )
+
+
+# ============================================================
 # CREATE MODERN PHOTO CARD
 # ============================================================
 
@@ -975,6 +1123,26 @@ def create_photo_card(
     title,
     source
 ):
+    """
+    Builds a premium, modern photo-card for Facebook:
+
+      original article photo
+              +
+      soft corner vignette
+              +
+      cinematic corner brackets
+              +
+      frosted-glass source badge
+              +
+      accent rule + soft-shadow headline
+              +
+      brand-accent footer bar
+              +
+      subtle film grain
+
+    Same inputs/outputs as before — a 1200x1200 JPEG in a
+    BytesIO buffer, or None on failure.
+    """
 
     try:
 
@@ -983,31 +1151,31 @@ def create_photo_card(
         # ----------------------------------------------------
 
         title_bengali_font = get_font(
-            58,
+            60,
             bold=True,
             bengali=True
         )
 
         title_latin_font = get_font(
-            58,
+            60,
             bold=True,
             bengali=False
         )
 
         source_bengali_font = get_font(
-            28,
+            27,
             bold=True,
             bengali=True
         )
 
         source_latin_font = get_font(
-            28,
+            27,
             bold=True,
             bengali=False
         )
 
         # ----------------------------------------------------
-        # Prepare image
+        # Prepare the original article photo
         # ----------------------------------------------------
 
         image = crop_to_square(
@@ -1022,38 +1190,24 @@ def create_photo_card(
             Image.Resampling.LANCZOS
         )
 
+        card = image.convert("RGBA")
+
         # ----------------------------------------------------
-        # Background
+        # Vignette — soft darkening toward the corners
         # ----------------------------------------------------
 
-        background = image.copy()
-
-        background = background.filter(
-            ImageFilter.GaussianBlur(8)
+        vignette = create_vignette(
+            (CARD_WIDTH, CARD_HEIGHT),
+            strength=120
         )
 
-        dark_overlay = Image.new(
-            "RGBA",
-            background.size,
-            (0, 0, 0, 65)
-        )
-
-        background = Image.alpha_composite(
-            background.convert("RGBA"),
-            dark_overlay
-        )
-
-        card = background.convert(
-            "RGBA"
-        )
-
-        # Original article image
-        card.alpha_composite(
-            image.convert("RGBA")
+        card = Image.alpha_composite(
+            card,
+            vignette
         )
 
         # ----------------------------------------------------
-        # Top gradient
+        # Top gradient — protects the source badge
         # ----------------------------------------------------
 
         top_gradient = Image.new(
@@ -1066,12 +1220,10 @@ def create_photo_card(
             top_gradient
         )
 
-        for y in range(500):
+        for y in range(420):
 
             alpha = int(
-                150 * (
-                    1 - y / 500
-                )
+                130 * (1 - y / 420) ** 1.3
             )
 
             gd.line(
@@ -1079,12 +1231,7 @@ def create_photo_card(
                     (0, y),
                     (CARD_WIDTH, y)
                 ],
-                fill=(
-                    0,
-                    0,
-                    0,
-                    alpha
-                )
+                fill=(10, 8, 8, alpha)
             )
 
         card = Image.alpha_composite(
@@ -1093,7 +1240,7 @@ def create_photo_card(
         )
 
         # ----------------------------------------------------
-        # Bottom gradient
+        # Bottom gradient — protects the title
         # ----------------------------------------------------
 
         bottom_gradient = Image.new(
@@ -1106,7 +1253,7 @@ def create_photo_card(
             bottom_gradient
         )
 
-        start_y = 600
+        start_y = 560
 
         for y in range(
             start_y,
@@ -1120,7 +1267,7 @@ def create_photo_card(
             )
 
             alpha = int(
-                20 + 205 * progress
+                25 + 218 * (progress ** 1.15)
             )
 
             gd2.line(
@@ -1128,12 +1275,7 @@ def create_photo_card(
                     (0, y),
                     (CARD_WIDTH, y)
                 ],
-                fill=(
-                    0,
-                    0,
-                    0,
-                    alpha
-                )
+                fill=(8, 6, 6, alpha)
             )
 
         card = Image.alpha_composite(
@@ -1146,7 +1288,16 @@ def create_photo_card(
         )
 
         # ----------------------------------------------------
-        # SOURCE BADGE
+        # CORNER BRACKETS
+        # ----------------------------------------------------
+
+        draw_corner_brackets(
+            draw,
+            card.size
+        )
+
+        # ----------------------------------------------------
+        # SOURCE BADGE — frosted glass pill + accent dot
         # ----------------------------------------------------
 
         badge_text = source
@@ -1158,53 +1309,70 @@ def create_photo_card(
             source_latin_font
         )
 
-        badge_x = 55
-        badge_y = 55
+        badge_x = 56
+        badge_y = 56
+
+        left_pad = 24
+        dot_diameter = 12
+        text_gap = 14
+        right_pad = 26
 
         badge_width = (
-            text_width + 44
+            left_pad
+            + dot_diameter
+            + text_gap
+            + text_width
+            + right_pad
         )
 
-        badge_height = 54
+        badge_height = 58
 
-        draw.rounded_rectangle(
+        badge_box = (
+            badge_x,
+            badge_y,
+            badge_x + badge_width,
+            badge_y + badge_height,
+        )
+
+        apply_glass_panel(
+            card,
+            badge_box,
+            corner_radius=29,
+            blur_radius=26,
+            tint_alpha=150
+        )
+
+        draw = ImageDraw.Draw(card)  # rebind after paste
+
+        dot_radius = dot_diameter // 2
+        dot_cx = badge_x + left_pad + dot_radius
+        dot_cy = badge_y + badge_height // 2
+
+        draw.ellipse(
             (
-                badge_x,
-                badge_y,
-                badge_x + badge_width,
-                badge_y + badge_height
+                dot_cx - dot_radius, dot_cy - dot_radius,
+                dot_cx + dot_radius, dot_cy + dot_radius,
             ),
-            radius=27,
-            fill=(
-                255,
-                255,
-                255,
-                225
-            )
+            fill=ACCENT_COLOR,
         )
 
         draw_mixed_text(
             draw,
             (
-                badge_x + 22,
-                badge_y + 8
+                badge_x + left_pad + dot_diameter + text_gap,
+                badge_y + 15
             ),
             badge_text,
             source_bengali_font,
             source_latin_font,
-            (
-                20,
-                20,
-                20,
-                255
-            )
+            (25, 22, 20, 255),
         )
 
         # ----------------------------------------------------
         # TITLE WRAPPING
         # ----------------------------------------------------
 
-        max_width = 1050
+        max_width = 1060
 
         lines = wrap_text(
             draw,
@@ -1245,7 +1413,7 @@ def create_photo_card(
         # TITLE HEIGHT
         # ----------------------------------------------------
 
-        line_spacing = 12
+        line_spacing = 14
 
         heights = []
 
@@ -1269,61 +1437,100 @@ def create_photo_card(
             )
         )
 
-        y = (
+        title_top = (
             CARD_HEIGHT
             - total_height
-            - 90
+            - 96
         )
 
         # ----------------------------------------------------
-        # TITLE SHADOW + TITLE
+        # ACCENT RULE ABOVE THE HEADLINE
         # ----------------------------------------------------
 
-        for line, height in zip(
-            lines,
-            heights
-        ):
+        rule_y = title_top - 30
 
-            # Shadow
+        draw.rectangle(
+            (60, rule_y, 60 + 64, rule_y + 4),
+            fill=ACCENT_COLOR,
+        )
+
+        # ----------------------------------------------------
+        # TITLE — soft blurred shadow, then crisp text on top
+        # ----------------------------------------------------
+
+        shadow_layer = Image.new(
+            "RGBA",
+            card.size,
+            (0, 0, 0, 0)
+        )
+
+        shadow_draw = ImageDraw.Draw(
+            shadow_layer
+        )
+
+        y = title_top
+
+        for line, height in zip(lines, heights):
+
             draw_mixed_text(
-                draw,
-                (
-                    63,
-                    y + 4
-                ),
+                shadow_draw,
+                (60, y + 5),
                 line,
                 title_bengali_font,
                 title_latin_font,
-                (
-                    0,
-                    0,
-                    0,
-                    190
-                )
+                (0, 0, 0, 210),
             )
 
-            # Main title
+            y += height + line_spacing
+
+        shadow_layer = shadow_layer.filter(
+            ImageFilter.GaussianBlur(7)
+        )
+
+        card = Image.alpha_composite(
+            card,
+            shadow_layer
+        )
+
+        draw = ImageDraw.Draw(card)  # rebind after composite
+
+        y = title_top
+
+        for line, height in zip(lines, heights):
+
             draw_mixed_text(
                 draw,
-                (
-                    60,
-                    y
-                ),
+                (60, y),
                 line,
                 title_bengali_font,
                 title_latin_font,
-                (
-                    255,
-                    255,
-                    255,
-                    255
-                )
+                (255, 255, 255, 255),
             )
 
-            y += (
-                height
-                + line_spacing
-            )
+            y += height + line_spacing
+
+        # ----------------------------------------------------
+        # FOOTER ACCENT BAR
+        # ----------------------------------------------------
+
+        draw.rectangle(
+            (0, CARD_HEIGHT - 9, CARD_WIDTH, CARD_HEIGHT),
+            fill=ACCENT_COLOR,
+        )
+
+        # ----------------------------------------------------
+        # FILM GRAIN — subtle, premium print-like texture
+        # ----------------------------------------------------
+
+        grain = create_grain_layer(
+            card.size,
+            opacity=9
+        )
+
+        card = Image.alpha_composite(
+            card,
+            grain
+        )
 
         # ----------------------------------------------------
         # EXPORT
@@ -1336,7 +1543,7 @@ def create_photo_card(
         ).save(
             output,
             format="JPEG",
-            quality=94,
+            quality=95,
             optimize=True
         )
 
