@@ -24,16 +24,32 @@ def init_db():
 
 def save_news(article):
     try:
+
+        published_at = article.get(
+            "published_at"
+        )
+
+        if published_at and hasattr(
+            published_at,
+            "isoformat"
+        ):
+            published_at = published_at.isoformat()
+
         result = (
             supabase
             .table("news")
             .insert({
                 "source": article["source"],
                 "title": article["title"],
-                "description": article["description"],
-                "image": article["image"],
+                "description": article.get(
+                    "description",
+                    ""
+                ),
+                "image": article.get(
+                    "image"
+                ),
                 "url": article["url"],
-                "published_at": article["published_at"],
+                "published_at": published_at,
             })
             .execute()
         )
@@ -41,8 +57,18 @@ def save_news(article):
         return bool(result.data)
 
     except Exception as e:
-        if "duplicate" in str(e).lower() or "unique" in str(e).lower():
+
+        error_text = str(e).lower()
+
+        if (
+            "duplicate" in error_text
+            or "unique" in error_text
+        ):
             return False
 
-        print("Database error:", e)
+        print(
+            "Database error:",
+            e
+        )
+
         return False

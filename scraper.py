@@ -2,10 +2,21 @@ import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse
 from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
 import json
 import re
 
 from database import init_db, save_news
+
+
+# ==========================================
+# CONFIG
+# ==========================================
+
+MAX_LINKS_PER_SITE = 80
+NEWS_MAX_AGE_DAYS = 2
+
+BANGLADESH_TZ = ZoneInfo("Asia/Dhaka")
 
 
 # ==========================================
@@ -15,25 +26,32 @@ from database import init_db, save_news
 SITES = [
     {
         "name": "BDNews24",
-        "url": "https://bdnews24.com/"
+        "url": "https://bangla.bdnews24.com/",
+        "listing_url": "https://bangla.bdnews24.com/"
     },
+
     {
         "name": "The Daily Star",
-        "url": "https://www.thedailystar.net/"
+        "url": "https://www.thedailystar.net/",
+        "listing_url": "https://www.thedailystar.net/"
     },
+
     {
         "name": "Prothom Alo",
-        "url": "https://www.prothomalo.com/"
+        "url": "https://www.prothomalo.com/",
+        "listing_url": "https://www.prothomalo.com/"
     },
+
     {
         "name": "The Business Standard",
-        "url": "https://www.tbsnews.net/"
+        "url": "https://www.tbsnews.net/",
+        "listing_url": "https://www.tbsnews.net/latest"
     }
 ]
 
 
 # ==========================================
-# REQUEST HEADERS
+# HEADERS
 # ==========================================
 
 HEADERS = {
@@ -42,12 +60,13 @@ HEADERS = {
         "AppleWebKit/537.36 "
         "(KHTML, like Gecko) "
         "Chrome/139.0 Safari/537.36"
-    )
+    ),
+    "Accept-Language": "en-US,en;q=0.9,bn;q=0.8"
 }
 
 
 # ==========================================
-# GET WEB PAGE
+# GET PAGE
 # ==========================================
 
 def get_page(url):
@@ -66,183 +85,16 @@ def get_page(url):
 
     except requests.RequestException as e:
 
-        print(f"Request failed: {url}")
+        print()
+        print("Request failed:")
+        print(url)
         print(e)
 
         return None
 
 
 # ==========================================
-# FIND PUBLISHED DATE
-# ==========================================
-
-def extract_published_date(soup):
-
-    # --------------------------------------
-    # 1. OpenGraph / article metadata
-    # --------------------------------------
-
-    meta_names = [
-        ("meta", {"property": "article:published_time"}),
-        ("meta", {"property": "og:published_time"}),
-        ("meta", {"name": "date"}),
-        ("meta", {"name": "publish-date"}),
-        ("meta", {"name": "published_time"}),
-        ("meta", {"name": "datePublished"}),
-    ]
-
-    for tag_name, attrs in meta_names:
-
-        tag = soup.find(
-            tag_name,
-            attrs
-        )
-
-        if tag:
-
-            value = (
-                tag.get("content")
-                or tag.get("datetime")
-            )
-
-            if value:
-
-                parsed = parse_date(value)
-
-                if parsed:
-                    return parsed
-
-
-    # --------------------------------------
-    # 2. <time datetime="...">
-    # --------------------------------------
-
-    time_tags = soup.find_all(
-        "time"
-    )
-
-    for tag in time_tags:
-
-        value = (
-            tag.get("datetime")
-            or tag.get("content")
-        )
-
-        if value:
-
-            parsed = parse_date(value)
-
-            if parsed:
-                return parsed
-
-
-    # --------------------------------------
-    # 3. JSON-LD
-    # --------------------------------------
-
-    scripts = soup.find_all(
-        "script",
-        type="application/ld+json"
-    )
-
-    for script in scripts:
-
-        try:
-
-            data = json.loads(
-                script.string or script.get_text()
-            )
-
-        except Exception:
-
-            continue
-
-
-        objects = []
-
-        if isinstance(data, dict):
-
-            objects.append(data)
-
-            graph = data.get("@graph")
-
-            if isinstance(graph, list):
-
-                objects.extend(graph)
-
-        elif isinstance(data, list):
-
-            objects.extend(data)
-
-
-        for obj in objects:
-
-            if not isinstance(obj, dict):
-                continue
-
-
-            date_value = (
-                obj.get("datePublished")
-                or obj.get("dateCreated")
-            )
-
-
-            if date_value:
-
-                parsed = parse_date(
-                    date_value
-                )
-
-                if parsed:
-
-                    return parsed
-
-
-    # --------------------------------------
-    # 4. Common HTML classes
-    # --------------------------------------
-
-    selectors = [
-        ".published-date",
-        ".publish-date",
-        ".published",
-        ".article-date",
-        ".post-date",
-        ".date"
-    ]
-
-
-    for selector in selectors:
-
-        tag = soup.select_one(
-            selector
-        )
-
-        if tag:
-
-            value = tag.get(
-                "datetime"
-            ) or tag.get_text(
-                " ",
-                strip=True
-            )
-
-
-            parsed = parse_date(
-                value
-            )
-
-
-            if parsed:
-
-                return parsed
-
-
-    return None
-
-
-# ==========================================
-# DATE PARSER
+# PARSE DATE
 # ==========================================
 
 def parse_date(value):
@@ -250,9 +102,10 @@ def parse_date(value):
     if not value:
         return None
 
+    value = str(value).strip()
 
-    value = value.strip()
-
+    if not value:
+        return None
 
     # --------------------------------------
     # ISO 8601
@@ -269,18 +122,15 @@ def parse_date(value):
             value_clean
         )
 
-
         if dt.tzinfo is None:
 
             dt = dt.replace(
-                tzinfo=timezone.utc
+                tzinfo=BANGLADESH_TZ
             )
-
 
         return dt.isoformat()
 
     except ValueError:
-
         pass
 
 
@@ -291,19 +141,31 @@ def parse_date(value):
     formats = [
 
         "%Y-%m-%d %H:%M:%S",
-
         "%Y-%m-%d %H:%M",
 
         "%Y-%m-%d",
 
         "%d-%m-%Y %H:%M:%S",
-
         "%d-%m-%Y %H:%M",
 
         "%d/%m/%Y %H:%M:%S",
-
         "%d/%m/%Y %H:%M",
 
+        "%d %B %Y %H:%M:%S",
+        "%d %B %Y %H:%M",
+        "%d %B %Y",
+
+        "%d %b %Y %H:%M:%S",
+        "%d %b %Y %H:%M",
+        "%d %b %Y",
+
+        "%B %d, %Y %H:%M:%S",
+        "%B %d, %Y %H:%M",
+        "%B %d, %Y",
+
+        "%b %d, %Y %H:%M:%S",
+        "%b %d, %Y %H:%M",
+        "%b %d, %Y",
     ]
 
 
@@ -316,11 +178,9 @@ def parse_date(value):
                 fmt
             )
 
-
             dt = dt.replace(
-                tzinfo=timezone.utc
+                tzinfo=BANGLADESH_TZ
             )
-
 
             return dt.isoformat()
 
@@ -333,15 +193,249 @@ def parse_date(value):
 
 
 # ==========================================
-# CHECK NEWS AGE
+# EXTRACT PUBLISHED DATE
+# ==========================================
+
+def extract_published_date(soup):
+
+    # --------------------------------------
+    # META TAGS
+    # --------------------------------------
+
+    meta_tags = [
+
+        ("property", "article:published_time"),
+        ("property", "article:published"),
+        ("property", "og:published_time"),
+
+        ("name", "date"),
+        ("name", "publish-date"),
+        ("name", "published"),
+        ("name", "published_time"),
+        ("name", "datePublished"),
+        ("name", "timestamp"),
+
+        ("itemprop", "datePublished"),
+    ]
+
+
+    for attr, value in meta_tags:
+
+        tag = soup.find(
+            "meta",
+            attrs={
+                attr: value
+            }
+        )
+
+        if tag:
+
+            date_value = (
+                tag.get("content")
+                or tag.get("datetime")
+                or tag.get("value")
+            )
+
+            if date_value:
+
+                parsed = parse_date(
+                    date_value
+                )
+
+                if parsed:
+                    return parsed
+
+
+    # --------------------------------------
+    # TIME TAGS
+    # --------------------------------------
+
+    for tag in soup.find_all("time"):
+
+        date_value = (
+            tag.get("datetime")
+            or tag.get("content")
+            or tag.get_text(
+                " ",
+                strip=True
+            )
+        )
+
+        if date_value:
+
+            parsed = parse_date(
+                date_value
+            )
+
+            if parsed:
+                return parsed
+
+
+    # --------------------------------------
+    # JSON-LD
+    # --------------------------------------
+
+    scripts = soup.find_all(
+        "script",
+        type="application/ld+json"
+    )
+
+
+    for script in scripts:
+
+        try:
+
+            raw = (
+                script.string
+                or script.get_text()
+            )
+
+            data = json.loads(raw)
+
+        except Exception:
+
+            continue
+
+
+        objects = []
+
+
+        if isinstance(data, dict):
+
+            objects.append(data)
+
+            graph = data.get("@graph")
+
+            if isinstance(graph, list):
+
+                objects.extend(graph)
+
+
+        elif isinstance(data, list):
+
+            objects.extend(data)
+
+
+        for obj in objects:
+
+            if not isinstance(obj, dict):
+                continue
+
+
+            date_value = (
+                obj.get("datePublished")
+                or obj.get("dateCreated")
+                or obj.get("dateModified")
+            )
+
+
+            if date_value:
+
+                parsed = parse_date(
+                    date_value
+                )
+
+                if parsed:
+                    return parsed
+
+
+    # --------------------------------------
+    # COMMON HTML SELECTORS
+    # --------------------------------------
+
+    selectors = [
+
+        ".published-date",
+        ".publish-date",
+        ".published",
+        ".article-date",
+        ".post-date",
+
+        "[class*='published']",
+        "[class*='publish-date']",
+        "[class*='article-date']",
+        "[class*='date']",
+    ]
+
+
+    for selector in selectors:
+
+        try:
+
+            tag = soup.select_one(
+                selector
+            )
+
+        except Exception:
+
+            continue
+
+
+        if tag:
+
+            date_value = (
+                tag.get("datetime")
+                or tag.get("content")
+                or tag.get_text(
+                    " ",
+                    strip=True
+                )
+            )
+
+            parsed = parse_date(
+                date_value
+            )
+
+            if parsed:
+                return parsed
+
+
+    # --------------------------------------
+    # RAW HTML FALLBACK
+    # --------------------------------------
+
+    html = str(soup)
+
+
+    patterns = [
+
+        r'"datePublished"\s*:\s*"([^"]+)"',
+
+        r'"publishedAt"\s*:\s*"([^"]+)"',
+
+        r'"publishDate"\s*:\s*"([^"]+)"',
+
+        r'"published_time"\s*:\s*"([^"]+)"',
+
+    ]
+
+
+    for pattern in patterns:
+
+        matches = re.findall(
+            pattern,
+            html,
+            flags=re.I
+        )
+
+        for value in matches:
+
+            parsed = parse_date(
+                value
+            )
+
+            if parsed:
+                return parsed
+
+
+    return None
+
+
+# ==========================================
+# CHECK RECENT NEWS
 # ==========================================
 
 def is_recent_news(published_at):
-
-    """
-    Return True only if the article was published
-    within the last 2 days.
-    """
 
     if not published_at:
         return False
@@ -360,7 +454,7 @@ def is_recent_news(published_at):
         if article_date.tzinfo is None:
 
             article_date = article_date.replace(
-                tzinfo=timezone.utc
+                tzinfo=BANGLADESH_TZ
             )
 
 
@@ -369,8 +463,16 @@ def is_recent_news(published_at):
         )
 
 
-        cutoff = now - timedelta(
-            days=2
+        article_date = article_date.astimezone(
+            timezone.utc
+        )
+
+
+        cutoff = (
+            now
+            - timedelta(
+                days=NEWS_MAX_AGE_DAYS
+            )
         )
 
 
@@ -380,7 +482,7 @@ def is_recent_news(published_at):
     except Exception as e:
 
         print(
-            "Date validation failed:",
+            "Date validation error:",
             published_at
         )
 
@@ -390,15 +492,439 @@ def is_recent_news(published_at):
 
 
 # ==========================================
-# ARTICLE EXTRACTION
+# SOURCE-SPECIFIC ARTICLE URL CHECK
 # ==========================================
 
-def extract_article(url, source):
+def is_probable_article_url(
+    url,
+    source
+):
 
-    html = get_page(url)
+    try:
+
+        parsed = urlparse(url)
+
+        path = parsed.path.rstrip("/").lower()
+
+        if not path:
+            return False
+
+
+        # ======================================
+        # BDNEWS24
+        # ======================================
+
+        if source == "BDNews24":
+
+            blocked = [
+
+                "/archive",
+                "/search",
+                "/category",
+                "/tag/",
+                "/author",
+                "/video",
+                "/photo",
+                "/gallery",
+                "/live",
+                "/about",
+                "/contact",
+
+            ]
+
+
+            if any(
+                item in path
+                for item in blocked
+            ):
+                return False
+
+
+            parts = [
+                x
+                for x in path.split("/")
+                if x
+            ]
+
+
+            # Need at least:
+            # /section/article-id
+
+            if len(parts) < 2:
+                return False
+
+
+            last_part = parts[-1]
+
+
+            # BDNews24 article IDs are
+            # generally hexadecimal strings.
+
+            if not re.fullmatch(
+                r"[a-f0-9]{8,}",
+                last_part
+            ):
+                return False
+
+
+            return True
+
+
+        # ======================================
+        # THE DAILY STAR
+        # ======================================
+
+        if source == "The Daily Star":
+
+            blocked = [
+
+                "/search",
+                "/tag/",
+                "/author/",
+                "/category/",
+                "/subscribe",
+                "/about",
+                "/contact",
+                "/video/",
+                "/photo/",
+                "/gallery/",
+
+            ]
+
+
+            if any(
+                item in path
+                for item in blocked
+            ):
+                return False
+
+
+            # Actual Daily Star article URLs
+            # normally end with numeric article ID.
+
+            if not re.search(
+                r"-\d+$",
+                path
+            ):
+                return False
+
+
+            return True
+
+
+        # ======================================
+        # PROTHOM ALO
+        # ======================================
+
+        if source == "Prothom Alo":
+
+            blocked = [
+
+                "/search",
+                "/collection",
+                "/author/",
+                "/topic/",
+                "/tag/",
+                "/video/",
+                "/photo/",
+                "/gallery/",
+                "/about",
+                "/contact",
+
+            ]
+
+
+            if any(
+                item in path
+                for item in blocked
+            ):
+                return False
+
+
+            parts = [
+                x
+                for x in path.split("/")
+                if x
+            ]
+
+
+            if len(parts) < 2:
+                return False
+
+
+            last_part = parts[-1]
+
+
+            # Prothom Alo article ID
+            # example: g7a92y0s2h
+
+            if not re.fullmatch(
+                r"[a-zA-Z0-9_-]{8,}",
+                last_part
+            ):
+                return False
+
+
+            return True
+
+
+        # ======================================
+        # THE BUSINESS STANDARD
+        # ======================================
+
+        if source == "The Business Standard":
+
+            blocked = [
+
+                "/latest",
+                "/search",
+                "/tag/",
+                "/author/",
+                "/category/",
+                "/video/",
+                "/photo/",
+                "/gallery/",
+                "/about",
+                "/contact",
+
+            ]
+
+
+            if any(
+                item in path
+                for item in blocked
+            ):
+                return False
+
+
+            # TBS article URLs normally end
+            # with numeric article ID.
+
+            if not re.search(
+                r"-\d+$",
+                path
+            ):
+                return False
+
+
+            return True
+
+
+        return False
+
+
+    except Exception:
+
+        return False
+
+
+# ==========================================
+# FIND ARTICLE LINKS
+# ==========================================
+
+def get_article_links(site):
+
+    listing_url = site[
+        "listing_url"
+    ]
+
+    print()
+    print(
+        "Listing page:",
+        listing_url
+    )
+
+
+    html = get_page(
+        listing_url
+    )
+
 
     if not html:
 
+        return []
+
+
+    soup = BeautifulSoup(
+        html,
+        "html.parser"
+    )
+
+
+    listing_domain = urlparse(
+        listing_url
+    ).netloc
+
+
+    links = []
+    seen = set()
+
+
+    # ======================================
+    # NORMAL <a href="">
+    # ======================================
+
+    for a in soup.find_all(
+        "a",
+        href=True
+    ):
+
+        href = a.get(
+            "href"
+        )
+
+
+        if not href:
+            continue
+
+
+        url = urljoin(
+            listing_url,
+            href
+        )
+
+
+        parsed = urlparse(
+            url
+        )
+
+
+        # ----------------------------------
+        # Same domain only
+        # ----------------------------------
+
+        if parsed.netloc != listing_domain:
+            continue
+
+
+        # ----------------------------------
+        # Remove fragments
+        # ----------------------------------
+
+        clean_url = url.split(
+            "#"
+        )[0]
+
+
+        # ----------------------------------
+        # Remove duplicate
+        # ----------------------------------
+
+        if clean_url in seen:
+            continue
+
+
+        # ----------------------------------
+        # Article URL filter
+        # ----------------------------------
+
+        if not is_probable_article_url(
+            clean_url,
+            site["name"]
+        ):
+            continue
+
+
+        # ----------------------------------
+        # Link text
+        # ----------------------------------
+
+        title = a.get_text(
+            " ",
+            strip=True
+        )
+
+
+        # Very short links are usually
+        # navigation/category links.
+
+        if len(title) < 15:
+            continue
+
+
+        seen.add(
+            clean_url
+        )
+
+
+        links.append(
+            clean_url
+        )
+
+
+    # ======================================
+    # PROTHOM ALO FALLBACK
+    # ======================================
+
+    if (
+        site["name"] == "Prothom Alo"
+        and len(links) < MAX_LINKS_PER_SITE
+    ):
+
+        raw_html = html.replace(
+            "\\/",
+            "/"
+        )
+
+
+        pattern = (
+            r'https?://www\.prothomalo\.com'
+            r'/[A-Za-z0-9_./-]+'
+        )
+
+
+        matches = re.findall(
+            pattern,
+            raw_html
+        )
+
+
+        for url in matches:
+
+            url = url.rstrip(
+                '",\\'
+            )
+
+
+            if url in seen:
+                continue
+
+
+            if not is_probable_article_url(
+                url,
+                site["name"]
+            ):
+                continue
+
+
+            seen.add(
+                url
+            )
+
+
+            links.append(
+                url
+            )
+
+
+    return links
+
+
+# ==========================================
+# EXTRACT ARTICLE
+# ==========================================
+
+def extract_article(
+    url,
+    source
+):
+
+    html = get_page(
+        url
+    )
+
+
+    if not html:
         return None
 
 
@@ -408,12 +934,14 @@ def extract_article(url, source):
     )
 
 
-    # --------------------------------------
+    # ======================================
     # TITLE
-    # --------------------------------------
+    # ======================================
 
     title = None
 
+
+    # og:title
 
     tag = soup.find(
         "meta",
@@ -428,9 +956,14 @@ def extract_article(url, source):
         )
 
 
+    # h1 fallback
+
     if not title:
 
-        h1 = soup.find("h1")
+        h1 = soup.find(
+            "h1"
+        )
+
 
         if h1:
 
@@ -440,9 +973,26 @@ def extract_article(url, source):
             )
 
 
-    # --------------------------------------
+    # title tag fallback
+
+    if not title and soup.title:
+
+        title = soup.title.get_text(
+            " ",
+            strip=True
+        )
+
+
+    if not title:
+        return None
+
+
+    title = title.strip()
+
+
+    # ======================================
     # DESCRIPTION
-    # --------------------------------------
+    # ======================================
 
     description = ""
 
@@ -479,9 +1029,9 @@ def extract_article(url, source):
             )
 
 
-    # --------------------------------------
+    # ======================================
     # IMAGE
-    # --------------------------------------
+    # ======================================
 
     image = None
 
@@ -507,60 +1057,52 @@ def extract_article(url, source):
         )
 
 
-    # --------------------------------------
+    # ======================================
     # PUBLISHED DATE
-    # --------------------------------------
+    # ======================================
 
-    published_at = extract_published_date(
-        soup
+    published_at = (
+        extract_published_date(
+            soup
+        )
     )
 
 
-    # --------------------------------------
-    # VALIDATE TITLE
-    # --------------------------------------
-
-    if not title:
-
-        return None
-
-
-    # --------------------------------------
-    # IMPORTANT:
-    # SKIP ARTICLES WITHOUT DATE
-    # --------------------------------------
+    # ======================================
+    # NO DATE
+    # ======================================
 
     if not published_at:
 
+        print()
         print(
-            "Skipping article: "
-            "publication date not found."
+            "[SKIP - NO DATE]"
         )
 
         print(
             "TITLE:",
-            title.strip()
+            title
         )
 
         return None
 
 
-    # --------------------------------------
-    # IMPORTANT:
-    # SKIP ARTICLES OLDER THAN 2 DAYS
-    # --------------------------------------
+    # ======================================
+    # OLDER THAN 2 DAYS
+    # ======================================
 
     if not is_recent_news(
         published_at
     ):
 
+        print()
         print(
-            "\n[SKIP - OLDER THAN 2 DAYS]"
+            "[SKIP - OLDER THAN 2 DAYS]"
         )
 
         print(
             "TITLE:",
-            title.strip()
+            title
         )
 
         print(
@@ -571,15 +1113,15 @@ def extract_article(url, source):
         return None
 
 
-    # --------------------------------------
-    # RETURN ARTICLE
-    # --------------------------------------
+    # ======================================
+    # RETURN
+    # ======================================
 
     return {
 
         "source": source,
 
-        "title": title.strip(),
+        "title": title,
 
         "description":
             description.strip(),
@@ -590,107 +1132,7 @@ def extract_article(url, source):
 
         "published_at":
             published_at
-
     }
-
-
-# ==========================================
-# FIND ARTICLE LINKS
-# ==========================================
-
-def get_article_links(site):
-
-    html = get_page(
-        site["url"]
-    )
-
-
-    if not html:
-
-        return []
-
-
-    soup = BeautifulSoup(
-        html,
-        "html.parser"
-    )
-
-
-    domain = urlparse(
-        site["url"]
-    ).netloc
-
-
-    links = []
-
-    seen = set()
-
-
-    for a in soup.find_all(
-        "a",
-        href=True
-    ):
-
-        href = a.get(
-            "href"
-        )
-
-
-        if not href:
-
-            continue
-
-
-        url = urljoin(
-            site["url"],
-            href
-        )
-
-
-        parsed = urlparse(
-            url
-        )
-
-
-        # --------------------------------------
-        # Same domain only
-        # --------------------------------------
-
-        if parsed.netloc != domain:
-
-            continue
-
-
-        # --------------------------------------
-        # Ignore duplicate
-        # --------------------------------------
-
-        if url in seen:
-
-            continue
-
-
-        title = a.get_text(
-            " ",
-            strip=True
-        )
-
-
-        # --------------------------------------
-        # Ignore navigation links
-        # --------------------------------------
-
-        if len(title) < 20:
-
-            continue
-
-
-        seen.add(url)
-
-        links.append(url)
-
-
-    return links
 
 
 # ==========================================
@@ -700,12 +1142,12 @@ def get_article_links(site):
 def scrape_site(site):
 
     print()
-
     print(
         "=" * 70
     )
 
     print(
+        "SOURCE:",
         site["name"]
     )
 
@@ -714,25 +1156,70 @@ def scrape_site(site):
     )
 
 
+    # ======================================
+    # FIND ARTICLE LINKS
+    # ======================================
+
     links = get_article_links(
         site
     )
 
 
+    print()
     print(
-        "Possible links:",
+        "Possible article links:",
         len(links)
     )
 
 
+    if not links:
+
+        print(
+            "WARNING: No article links found."
+        )
+
+        return
+
+
     new_count = 0
+    skipped_count = 0
+    existing_count = 0
 
 
-    # --------------------------------------
-    # Check maximum 20 links
-    # --------------------------------------
+    # ======================================
+    # ONLY FIRST 80 LINKS
+    # ======================================
 
-    for url in links[:20]:
+    links_to_check = links[
+        :MAX_LINKS_PER_SITE
+    ]
+
+
+    print(
+        "Will check:",
+        len(links_to_check)
+    )
+
+
+    # ======================================
+    # CHECK ARTICLES
+    # ======================================
+
+    for index, url in enumerate(
+        links_to_check,
+        start=1
+    ):
+
+        print()
+        print(
+            f"[{index}/{len(links_to_check)}]"
+        )
+
+        print(
+            "URL:",
+            url
+        )
+
 
         article = extract_article(
             url,
@@ -742,8 +1229,14 @@ def scrape_site(site):
 
         if not article:
 
+            skipped_count += 1
+
             continue
 
+
+        # ==================================
+        # SAVE
+        # ==================================
 
         inserted = save_news(
             article
@@ -755,28 +1248,25 @@ def scrape_site(site):
             new_count += 1
 
 
+            print()
             print(
-                "\n[NEW]"
+                "[NEW]"
             )
-
 
             print(
                 "TITLE:",
                 article["title"]
             )
 
-
             print(
                 "DATE:",
                 article["published_at"]
             )
 
-
             print(
                 "IMAGE:",
                 article["image"]
             )
-
 
             print(
                 "URL:",
@@ -784,13 +1274,65 @@ def scrape_site(site):
             )
 
 
+        else:
+
+            existing_count += 1
+
+            print(
+                "[ALREADY EXISTS]"
+            )
+
+
+    # ======================================
+    # SUMMARY
+    # ======================================
+
+    print()
     print(
-        f"\nNew articles saved: {new_count}"
+        "-" * 70
+    )
+
+    print(
+        site["name"],
+        "SUMMARY"
+    )
+
+    print(
+        "-" * 70
+    )
+
+    print(
+        "Possible links:",
+        len(links)
+    )
+
+    print(
+        "Checked:",
+        len(links_to_check)
+    )
+
+    print(
+        "New saved:",
+        new_count
+    )
+
+    print(
+        "Already existed:",
+        existing_count
+    )
+
+    print(
+        "Skipped:",
+        skipped_count
+    )
+
+    print(
+        "-" * 70
     )
 
 
 # ==========================================
-# SCRAPE ALL SITES
+# SCRAPE ALL
 # ==========================================
 
 def scrape_all():
@@ -798,20 +1340,65 @@ def scrape_all():
     init_db()
 
 
+    print()
     print(
-        "\nStarting news scraper..."
+        "=" * 70
+    )
+
+    print(
+        "STARTING NEWS SCRAPER"
+    )
+
+    print(
+        "News age limit:",
+        NEWS_MAX_AGE_DAYS,
+        "days"
+    )
+
+    print(
+        "Maximum links per site:",
+        MAX_LINKS_PER_SITE
+    )
+
+    print(
+        "=" * 70
     )
 
 
     for site in SITES:
 
-        scrape_site(
-            site
-        )
+        try:
 
+            scrape_site(
+                site
+            )
+
+        except Exception as e:
+
+            print()
+            print(
+                "ERROR:",
+                site["name"]
+            )
+
+            print(e)
+
+            print(
+                "Continuing..."
+            )
+
+
+    print()
+    print(
+        "=" * 70
+    )
 
     print(
-        "\nScraping completed."
+        "SCRAPING COMPLETED"
+    )
+
+    print(
+        "=" * 70
     )
 
 
