@@ -1859,24 +1859,9 @@ def create_photo_card(
                 )
             )
 
-        card = Image.alpha_composite(
-            card.convert("RGBA"),
-            Image.new(
-                "RGBA",
-                (
-                    CARD_WIDTH,
-                    photo_y
-                ),
-                (
-                    0,
-                    0,
-                    0,
-                    0
-                )
-            )
-        )
-
-        # Re-create composite cleanly so the photo stays untouched.
+        # Re-create the final composite cleanly.
+        # Keep every alpha-composited layer exactly the same width
+        # and use RGBA for all alpha-composite operations.
         base = Image.new(
             "RGBA",
             (
@@ -1899,7 +1884,7 @@ def create_photo_card(
                 CARD_WIDTH,
                 photo_y
             )
-        )
+        ).convert("RGBA")
 
         base.alpha_composite(
             header_crop,
@@ -1919,12 +1904,13 @@ def create_photo_card(
         )
 
         # Photo overlay
-        base.alpha_composite(
+        base.paste(
             overlay,
             (
                 0,
                 photo_y
-            )
+            ),
+            overlay
         )
 
         draw = ImageDraw.Draw(
