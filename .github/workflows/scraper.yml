@@ -31,12 +31,12 @@ jobs:
         run: |
           python scraper.py
 
-    #   - name: Post News to Facebook
-    #     env:
-    #       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-    #       SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
-    #       FACEBOOK_PAGE_ID: ${{ secrets.FACEBOOK_PAGE_ID }}
-    #       FACEBOOK_PAGE_ACCESS_TOKEN: ${{ secrets.FACEBOOK_PAGE_ACCESS_TOKEN }}
-    #       META_GRAPH_VERSION: "v25.0"
-    #     run: |
-    #       python facebook_poster.py
+      - name: Post News to Facebook
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          FACEBOOK_PAGE_ID: ${{ secrets.FACEBOOK_PAGE_ID }}
+          FACEBOOK_PAGE_ACCESS_TOKEN: ${{ secrets.FACEBOOK_PAGE_ACCESS_TOKEN }}
+          META_GRAPH_VERSION: "v25.0"
+        run: |
+          python facebook_poster.py
