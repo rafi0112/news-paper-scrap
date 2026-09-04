@@ -5,8 +5,7 @@ import subprocess
 import requests
 
 from urllib.parse import urljoin
-
-from PIL import Image, ImageDraw, ImageFont, ImageFilter
+from PIL import Image, ImageDraw, ImageFont, ImageFilter, features
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 from supabase import create_client, Client
@@ -31,7 +30,6 @@ META_GRAPH_VERSION = os.getenv(
     "v25.0"
 )
 
-# Maximum Facebook posts per GitHub Actions run
 MAX_POSTS_PER_RUN = 3
 
 CARD_WIDTH = 1200
@@ -96,137 +94,24 @@ session.headers.update({
 
 
 # ============================================================
-# BENGALI FONT
+# FONT HELPERS
 # ============================================================
 
-def get_font(size, bold=False):
-    """
-    Always use a Bengali-capable Noto font.
+def find_font_file(names):
+    """Find one of the requested font filenames."""
 
-    DejaVu Sans is intentionally NOT used as a fallback
-    because it can produce square boxes for Bengali text.
-    """
+    direct_roots = [
+        "/usr/share/fonts/truetype/noto",
+        "/usr/share/fonts/opentype/noto",
+        "/usr/local/share/fonts",
+    ]
 
-    # --------------------------------------------------------
-    # 1. fontconfig
-    # --------------------------------------------------------
+    for root in direct_roots:
+        for name in names:
+            path = os.path.join(root, name)
 
-    if bold:
-
-        queries = [
-            "Noto Sans Bengali:style=Bold",
-            "Noto Sans Bengali",
-            "Noto Sans Bengali UI:style=Bold",
-        ]
-
-    else:
-
-        queries = [
-            "Noto Sans Bengali:style=Regular",
-            "Noto Sans Bengali",
-            "Noto Sans Bengali UI:style=Regular",
-        ]
-
-    for query in queries:
-
-        try:
-
-            result = subprocess.run(
-                [
-                    "fc-match",
-                    "-f",
-                    "%{file}",
-                    query
-                ],
-                capture_output=True,
-                text=True,
-                check=True
-            )
-
-            font_path = result.stdout.strip()
-
-            if (
-                font_path
-                and os.path.exists(font_path)
-                and "DejaVu" not in font_path
-            ):
-
-                print(
-                    f"Font: {font_path}"
-                )
-
-                return ImageFont.truetype(
-                    font_path,
-                    size
-                )
-
-        except Exception as e:
-
-            print(
-                f"Font lookup failed for "
-                f"{query}: {e}"
-            )
-
-    # --------------------------------------------------------
-    # 2. Direct Noto paths
-    # --------------------------------------------------------
-
-    if bold:
-
-        direct_paths = [
-            "/usr/share/fonts/truetype/noto/"
-            "NotoSansBengali-Bold.ttf",
-
-            "/usr/share/fonts/opentype/noto/"
-            "NotoSansBengali-Bold.ttf",
-
-            "/usr/local/share/fonts/"
-            "NotoSansBengali-Bold.ttf",
-        ]
-
-    else:
-
-        direct_paths = [
-            "/usr/share/fonts/truetype/noto/"
-            "NotoSansBengali-Regular.ttf",
-
-            "/usr/share/fonts/opentype/noto/"
-            "NotoSansBengali-Regular.ttf",
-
-            "/usr/local/share/fonts/"
-            "NotoSansBengali-Regular.ttf",
-        ]
-
-    for font_path in direct_paths:
-
-        if os.path.exists(font_path):
-
-            print(
-                f"Font: {font_path}"
-            )
-
-            return ImageFont.truetype(
-                font_path,
-                size
-            )
-
-    # --------------------------------------------------------
-    # 3. Recursive search
-    # --------------------------------------------------------
-
-    if bold:
-
-        wanted_names = [
-            "NotoSansBengali-Bold.ttf",
-            "NotoSansBengaliUI-Bold.ttf",
-        ]
-
-    else:
-
-        wanted_names = [
-            "NotoSansBengali-Regular.ttf",
-            "NotoSansBengaliUI-Regular.ttf",
-        ]
+            if os.path.exists(path):
+                return path
 
     for root in [
         "/usr/share/fonts",
@@ -238,44 +123,350 @@ def get_font(size, bold=False):
 
         for dirpath, _, filenames in os.walk(root):
 
-            for filename in filenames:
+            for name in names:
 
-                if filename in wanted_names:
+                if name in filenames:
 
-                    font_path = os.path.join(
+                    return os.path.join(
                         dirpath,
-                        filename
+                        name
                     )
 
-                    print(
-                        f"Font: {font_path}"
-                    )
+    return None
 
-                    return ImageFont.truetype(
-                        font_path,
-                        size
-                    )
 
-    # --------------------------------------------------------
-    # IMPORTANT:
-    # Do NOT use DejaVu fallback.
-    # --------------------------------------------------------
+def get_font(size, bold=False, bengali=False):
+    """
+    Bengali text:
+        Noto Sans Bengali
 
-    raise RuntimeError(
-        "Noto Sans Bengali font was not found. "
-        "Install Bengali fonts before running "
-        "facebook_poster.py."
+    English/numbers:
+        DejaVu Sans
+
+    We intentionally keep the fonts separate so a mixed title
+    never renders English characters as missing-glyph boxes.
+    """
+
+    if bengali:
+
+        if bold:
+            names = [
+                "NotoSansBengali-Bold.ttf",
+                "NotoSansBengaliUI-Bold.ttf",
+            ]
+        else:
+            names = [
+                "NotoSansBengali-Regular.ttf",
+                "NotoSansBengaliUI-Regular.ttf",
+            ]
+
+        font_path = find_font_file(names)
+
+        if not font_path:
+            raise RuntimeError(
+                "Noto Sans Bengali was not found. "
+                "Install fonts-noto-core and fonts-noto-extra."
+            )
+
+    else:
+
+        if bold:
+            names = [
+                "DejaVuSans-Bold.ttf",
+            ]
+        else:
+            names = [
+                "DejaVuSans.ttf",
+            ]
+
+        font_path = find_font_file(names)
+
+        if not font_path:
+            raise RuntimeError(
+                "DejaVu Sans was not found."
+            )
+
+    print(f"Font: {font_path}")
+
+    return ImageFont.truetype(
+        font_path,
+        size
+    )
+
+
+def verify_text_rendering_support():
+    """
+    Verify that Pillow has RAQM support when available.
+
+    RAQM gives proper complex-script shaping for Bengali.
+    """
+
+    try:
+
+        if features.check("raqm"):
+
+            print(
+                "✓ Pillow RAQM support: ENABLED"
+            )
+
+        else:
+
+            print(
+                "⚠ Pillow RAQM support: NOT AVAILABLE"
+            )
+
+            print(
+                "Bengali rendering may be imperfect. "
+                "Install libraqm-dev before installing Pillow."
+            )
+
+    except Exception as e:
+
+        print(
+            f"⚠ Could not check RAQM support: {e}"
+        )
+
+
+# ============================================================
+# BENGALI DETECTION
+# ============================================================
+
+def contains_bengali(text):
+    if not text:
+        return False
+
+    return any(
+        "\u0980" <= char <= "\u09FF"
+        for char in text
     )
 
 
 # ============================================================
-# TEXT WRAPPING
+# MIXED TEXT RUNS
+# ============================================================
+
+def get_mixed_runs(text):
+    """
+    Split text into Bengali and non-Bengali runs.
+
+    Example:
+        বাংলা News Update
+
+    becomes:
+        বাংলা       -> Bengali font
+         News Update -> Latin font
+    """
+
+    if not text:
+        return []
+
+    runs = []
+
+    current = ""
+    current_is_bengali = None
+
+    for char in text:
+
+        is_bengali = (
+            "\u0980" <= char <= "\u09FF"
+        )
+
+        if current_is_bengali is None:
+
+            current = char
+            current_is_bengali = is_bengali
+
+        elif is_bengali == current_is_bengali:
+
+            current += char
+
+        else:
+
+            runs.append(
+                (
+                    current,
+                    current_is_bengali
+                )
+            )
+
+            current = char
+            current_is_bengali = is_bengali
+
+    if current:
+
+        runs.append(
+            (
+                current,
+                current_is_bengali
+            )
+        )
+
+    return runs
+
+
+# ============================================================
+# TEXT MEASUREMENT
+# ============================================================
+
+def text_bbox_for_run(
+    draw,
+    text,
+    font,
+    is_bengali
+):
+    """
+    Measure one text run.
+
+    Bengali uses language='bn' when RAQM is available.
+    """
+
+    kwargs = {}
+
+    if features.check("raqm"):
+
+        kwargs["direction"] = "ltr"
+        kwargs["language"] = (
+            "bn"
+            if is_bengali
+            else "en"
+        )
+
+    return draw.textbbox(
+        (0, 0),
+        text,
+        font=font,
+        **kwargs
+    )
+
+
+def mixed_text_width(
+    draw,
+    text,
+    bengali_font,
+    latin_font
+):
+
+    total_width = 0
+
+    for run, is_bengali in get_mixed_runs(text):
+
+        font = (
+            bengali_font
+            if is_bengali
+            else latin_font
+        )
+
+        bbox = text_bbox_for_run(
+            draw,
+            run,
+            font,
+            is_bengali
+        )
+
+        total_width += (
+            bbox[2] - bbox[0]
+        )
+
+    return total_width
+
+
+def mixed_text_height(
+    draw,
+    text,
+    bengali_font,
+    latin_font
+):
+
+    height = 0
+
+    for run, is_bengali in get_mixed_runs(text):
+
+        font = (
+            bengali_font
+            if is_bengali
+            else latin_font
+        )
+
+        bbox = text_bbox_for_run(
+            draw,
+            run,
+            font,
+            is_bengali
+        )
+
+        height = max(
+            height,
+            bbox[3] - bbox[1]
+        )
+
+    return height
+
+
+# ============================================================
+# DRAW MIXED TEXT
+# ============================================================
+
+def draw_mixed_text(
+    draw,
+    position,
+    text,
+    bengali_font,
+    latin_font,
+    fill
+):
+
+    x, y = position
+
+    for run, is_bengali in get_mixed_runs(text):
+
+        font = (
+            bengali_font
+            if is_bengali
+            else latin_font
+        )
+
+        kwargs = {}
+
+        if features.check("raqm"):
+
+            kwargs["direction"] = "ltr"
+            kwargs["language"] = (
+                "bn"
+                if is_bengali
+                else "en"
+            )
+
+        draw.text(
+            (x, y),
+            run,
+            font=font,
+            fill=fill,
+            **kwargs
+        )
+
+        bbox = text_bbox_for_run(
+            draw,
+            run,
+            font,
+            is_bengali
+        )
+
+        x += (
+            bbox[2] - bbox[0]
+        )
+
+    return x
+
+
+# ============================================================
+# WRAP MIXED TEXT
 # ============================================================
 
 def wrap_text(
     draw,
     text,
-    font,
+    bengali_font,
+    latin_font,
     max_width
 ):
 
@@ -292,14 +483,11 @@ def wrap_text(
             else current + " " + word
         )
 
-        bbox = draw.textbbox(
-            (0, 0),
+        width = mixed_text_width(
+            draw,
             test,
-            font=font
-        )
-
-        width = (
-            bbox[2] - bbox[0]
+            bengali_font,
+            latin_font
         )
 
         if width <= max_width:
@@ -309,6 +497,7 @@ def wrap_text(
         else:
 
             if current:
+
                 lines.append(
                     current
                 )
@@ -316,6 +505,7 @@ def wrap_text(
             current = word
 
     if current:
+
         lines.append(
             current
         )
@@ -334,16 +524,10 @@ def is_generic_image(url):
 
     lower = url.lower()
 
-    # ONLY truly generic assets are rejected.
-    #
     # IMPORTANT:
-    # Do NOT reject:
-    #
-    # /styles/social_share/
-    # share-image
-    #
-    # because TBS can use those paths for real
-    # article photographs.
+    # social_share and share-image are intentionally NOT
+    # considered generic because TBS can use them for real
+    # article photos.
 
     bad_patterns = [
 
@@ -372,13 +556,10 @@ def is_generic_image(url):
         "icon.jpg",
     ]
 
-    for pattern in bad_patterns:
-
-        if pattern in lower:
-
-            return True
-
-    return False
+    return any(
+        pattern in lower
+        for pattern in bad_patterns
+    )
 
 
 # ============================================================
@@ -455,7 +636,7 @@ def download_image(url):
 
 
 # ============================================================
-# ARTICLE PAGE IMAGE EXTRACTION
+# ARTICLE IMAGE EXTRACTION
 # ============================================================
 
 def extract_article_image(article_url):
@@ -483,7 +664,7 @@ def extract_article_image(article_url):
         )
 
         # ----------------------------------------------------
-        # 1. OpenGraph
+        # OpenGraph
         # ----------------------------------------------------
 
         og = soup.find(
@@ -513,7 +694,7 @@ def extract_article_image(article_url):
                 return image_url
 
         # ----------------------------------------------------
-        # 2. Twitter image
+        # Twitter
         # ----------------------------------------------------
 
         twitter = soup.find(
@@ -545,7 +726,7 @@ def extract_article_image(article_url):
                 return image_url
 
         # ----------------------------------------------------
-        # 3. JSON-LD
+        # JSON-LD
         # ----------------------------------------------------
 
         for script in soup.find_all(
@@ -583,7 +764,6 @@ def extract_article_image(article_url):
                         "image"
                     )
 
-                    # String
                     if isinstance(
                         image,
                         str
@@ -605,7 +785,6 @@ def extract_article_image(article_url):
 
                             return image_url
 
-                    # Dictionary
                     elif isinstance(
                         image,
                         dict
@@ -633,7 +812,6 @@ def extract_article_image(article_url):
 
                                 return image_url
 
-                    # List
                     elif isinstance(
                         image,
                         list
@@ -691,12 +869,10 @@ def resolve_article_image(
     article_url
 ):
 
-    # --------------------------------------------------------
     # FIRST:
     # Try the stored image.
     #
-    # This is important for TBS.
-    # --------------------------------------------------------
+    # This is important for TBS social_share images.
 
     if stored_image:
 
@@ -732,10 +908,8 @@ def resolve_article_image(
                 "banner/logo/default."
             )
 
-    # --------------------------------------------------------
     # SECOND:
-    # Search article page.
-    # --------------------------------------------------------
+    # Search article page metadata.
 
     actual_url = extract_article_image(
         article_url
@@ -759,7 +933,7 @@ def resolve_article_image(
 
 
 # ============================================================
-# CROP TO SQUARE
+# CROP IMAGE TO SQUARE
 # ============================================================
 
 def crop_to_square(image):
@@ -805,17 +979,31 @@ def create_photo_card(
     try:
 
         # ----------------------------------------------------
-        # Force Bengali fonts BEFORE generating image.
+        # Load BOTH font families.
         # ----------------------------------------------------
 
-        source_font = get_font(
-            28,
-            bold=True
+        title_bengali_font = get_font(
+            58,
+            bold=True,
+            bengali=True
         )
 
-        title_font = get_font(
+        title_latin_font = get_font(
             58,
-            bold=True
+            bold=True,
+            bengali=False
+        )
+
+        source_bengali_font = get_font(
+            28,
+            bold=True,
+            bengali=True
+        )
+
+        source_latin_font = get_font(
+            28,
+            bold=True,
+            bengali=False
         )
 
         # ----------------------------------------------------
@@ -963,14 +1151,11 @@ def create_photo_card(
 
         badge_text = source
 
-        bbox = draw.textbbox(
-            (0, 0),
+        text_width = mixed_text_width(
+            draw,
             badge_text,
-            font=source_font
-        )
-
-        text_width = (
-            bbox[2] - bbox[0]
+            source_bengali_font,
+            source_latin_font
         )
 
         badge_x = 55
@@ -998,14 +1183,16 @@ def create_photo_card(
             )
         )
 
-        draw.text(
+        draw_mixed_text(
+            draw,
             (
                 badge_x + 22,
                 badge_y + 8
             ),
             badge_text,
-            font=source_font,
-            fill=(
+            source_bengali_font,
+            source_latin_font,
+            (
                 20,
                 20,
                 20,
@@ -1014,7 +1201,7 @@ def create_photo_card(
         )
 
         # ----------------------------------------------------
-        # TITLE
+        # TITLE WRAPPING
         # ----------------------------------------------------
 
         max_width = 1050
@@ -1022,7 +1209,8 @@ def create_photo_card(
         lines = wrap_text(
             draw,
             title,
-            title_font,
+            title_bengali_font,
+            title_latin_font,
             max_width
         )
 
@@ -1038,21 +1226,24 @@ def create_photo_card(
 
                 test = last + "..."
 
-                bbox = draw.textbbox(
-                    (0, 0),
+                width = mixed_text_width(
+                    draw,
                     test,
-                    font=title_font
+                    title_bengali_font,
+                    title_latin_font
                 )
 
-                if (
-                    bbox[2] - bbox[0]
-                    <= max_width
-                ):
+                if width <= max_width:
 
                     lines[-1] = test
+
                     break
 
                 last = last[:-1]
+
+        # ----------------------------------------------------
+        # TITLE HEIGHT
+        # ----------------------------------------------------
 
         line_spacing = 12
 
@@ -1060,14 +1251,15 @@ def create_photo_card(
 
         for line in lines:
 
-            bbox = draw.textbbox(
-                (0, 0),
+            height = mixed_text_height(
+                draw,
                 line,
-                font=title_font
+                title_bengali_font,
+                title_latin_font
             )
 
             heights.append(
-                bbox[3] - bbox[1]
+                height
             )
 
         total_height = (
@@ -1084,7 +1276,7 @@ def create_photo_card(
         )
 
         # ----------------------------------------------------
-        # TITLE SHADOW + TEXT
+        # TITLE SHADOW + TITLE
         # ----------------------------------------------------
 
         for line, height in zip(
@@ -1093,14 +1285,16 @@ def create_photo_card(
         ):
 
             # Shadow
-            draw.text(
+            draw_mixed_text(
+                draw,
                 (
                     63,
                     y + 4
                 ),
                 line,
-                font=title_font,
-                fill=(
+                title_bengali_font,
+                title_latin_font,
+                (
                     0,
                     0,
                     0,
@@ -1108,15 +1302,17 @@ def create_photo_card(
                 )
             )
 
-            # White title
-            draw.text(
+            # Main title
+            draw_mixed_text(
+                draw,
                 (
                     60,
                     y
                 ),
                 line,
-                font=title_font,
-                fill=(
+                title_bengali_font,
+                title_latin_font,
+                (
                     255,
                     255,
                     255,
@@ -1130,7 +1326,7 @@ def create_photo_card(
             )
 
         # ----------------------------------------------------
-        # JPEG OUTPUT
+        # EXPORT
         # ----------------------------------------------------
 
         output = io.BytesIO()
@@ -1163,7 +1359,7 @@ def create_photo_card(
 
 
 # ============================================================
-# POST TO FACEBOOK
+# FACEBOOK POST
 # ============================================================
 
 def post_to_facebook(
@@ -1178,10 +1374,7 @@ def post_to_facebook(
         f"{FACEBOOK_PAGE_ID}/photos"
     )
 
-    # ONLY:
-    # Article title
-    # Article URL
-
+    # ONLY title + article URL.
     caption = (
         f"{title}\n\n"
         f"{article_url}"
@@ -1384,8 +1577,10 @@ def main():
         "Daily Star: SKIPPED"
     )
 
+    verify_text_rendering_support()
+
     # --------------------------------------------------------
-    # Get news
+    # Get unposted news
     # --------------------------------------------------------
 
     news = get_unposted_news()
@@ -1397,7 +1592,7 @@ def main():
     posted_count = 0
 
     # --------------------------------------------------------
-    # Process each article
+    # Process articles
     # --------------------------------------------------------
 
     for article in news:

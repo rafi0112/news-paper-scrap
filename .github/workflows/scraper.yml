@@ -15,7 +15,6 @@ jobs:
 
     runs-on: ubuntu-latest
 
-
     steps:
 
       # ======================================================
@@ -37,7 +36,7 @@ jobs:
 
 
       # ======================================================
-      # INSTALL DEPENDENCIES
+      # DEPENDENCIES + BENGALI FONTS
       # ======================================================
 
       - name: Install dependencies and Bengali fonts
@@ -49,7 +48,8 @@ jobs:
             fonts-noto-core \
             fonts-noto-ui-core \
             fonts-noto-extra \
-            fontconfig
+            fontconfig \
+            libraqm-dev
 
           python -m pip install --upgrade pip
 
@@ -57,7 +57,7 @@ jobs:
 
 
       # ======================================================
-      # VERIFY BENGALI FONT
+      # VERIFY BENGALI FONTS
       # ======================================================
 
       - name: Verify Bengali fonts
@@ -86,7 +86,7 @@ jobs:
 
 
       # ======================================================
-      # RUN NEWS SCRAPER
+      # SCRAPER
       # ======================================================
 
       - name: Run News Scraper
@@ -102,7 +102,7 @@ jobs:
 
 
       # ======================================================
-      # POST NEWS TO FACEBOOK
+      # FACEBOOK POSTER
       # ======================================================
 
       - name: Post News to Facebook
