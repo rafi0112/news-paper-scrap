@@ -1,15 +1,17 @@
 import os
 import io
 import json
-import subprocess
+import time
 import requests
 
-from datetime import datetime
+from datetime import datetime, timezone
 from urllib.parse import urljoin
 import re
-from PIL import Image, ImageDraw, ImageFont, features
+from PIL import Image, ImageDraw, ImageFont, ImageOps, ImageFilter, features
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 from supabase import create_client, Client
 
 
@@ -19,71 +21,86 @@ from supabase import create_client, Client
 
 load_dotenv()
 
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 
-FACEBOOK_PAGE_ID = os.getenv("FACEBOOK_PAGE_ID")
-FACEBOOK_PAGE_ACCESS_TOKEN = os.getenv(
-    "FACEBOOK_PAGE_ACCESS_TOKEN"
+def _clean_env(value):
+    """
+    Strip accidental quotes/whitespace from .env values.
+    This alone fixes a large share of "invalid Facebook token"
+    style errors that are really just formatting mistakes.
+    """
+    if value is None:
+        return value
+    return value.strip().strip('"').strip("'")
+
+
+SUPABASE_URL = _clean_env(os.getenv("SUPABASE_URL"))
+SUPABASE_KEY = _clean_env(os.getenv("SUPABASE_KEY"))
+
+FACEBOOK_PAGE_ID = _clean_env(os.getenv("FACEBOOK_PAGE_ID"))
+FACEBOOK_PAGE_ACCESS_TOKEN = _clean_env(
+    os.getenv("FACEBOOK_PAGE_ACCESS_TOKEN")
 )
 
-META_GRAPH_VERSION = os.getenv(
-    "META_GRAPH_VERSION",
-    "v25.0"
+META_GRAPH_VERSION = _clean_env(
+    os.getenv("META_GRAPH_VERSION", "v21.0")
 )
 
 MAX_POSTS_PER_RUN = 3
-
 REQUEST_TIMEOUT = 25
+FACEBOOK_TIMEOUT = (10, 60)   # (connect, read)
+FACEBOOK_MAX_RETRIES = 3
 
-# Maximum description/excerpt length in the Facebook caption.
-# This keeps the post concise instead of copying the full article.
-DESCRIPTION_MAX_CHARS = int(
-    os.getenv("DESCRIPTION_MAX_CHARS", "300")
-)
+# Facebook caption is generous (~63,000 chars) but we keep it tight
+# and readable regardless.
+DESCRIPTION_MAX_CHARS = int(os.getenv("DESCRIPTION_MAX_CHARS", "300"))
+CAPTION_MAX_CHARS = 4500
 
 # ------------------------------------------------------------
-# Card layout constants (the "photo card" look)
+# Card layout constants — modern editorial "photo card"
 # ------------------------------------------------------------
 
 CARD_WIDTH = 1200
 
-# The photo sits below the header, cropped to a square.
-PHOTO_SIZE = 1200
+# Fixed 4:5 portrait frame for the photo section. This keeps every
+# post a consistent, feed-friendly shape AND guarantees the source
+# image is shown in full (never cropped) — see fit_image_contain().
+PHOTO_WIDTH = CARD_WIDTH
+PHOTO_HEIGHT = int(CARD_WIDTH * 5 / 4)   # 1500
 
 SIDE_MARGIN = 64
-TOP_MARGIN = 56
+TOP_MARGIN = 50
 
-HEADLINE_FONT_SIZE = 56
-HEADLINE_LINE_SPACING = 12
-HEADLINE_MAX_LINES = 4
+HEADLINE_FONT_SIZE = 64
+HEADLINE_MIN_FONT_SIZE = 42
+HEADLINE_LINE_SPACING = 14
+HEADLINE_MAX_LINES = 5
 
-# Vertical highlighter padding around the highlighted text
-HIGHLIGHT_PAD_X = 10
-HIGHLIGHT_PAD_TOP = 6
-HIGHLIGHT_PAD_BOTTOM = 12
+HIGHLIGHT_PAD_X = 12
+HIGHLIGHT_PAD_TOP = 8
+HIGHLIGHT_PAD_BOTTOM = 14
+HIGHLIGHT_RADIUS = 10
 
-GAP_AFTER_HEADLINE = 22
+GAP_AFTER_HEADLINE = 26
 
 SOURCE_FONT_SIZE = 24
-GAP_AFTER_SOURCE = 34
+GAP_AFTER_SOURCE = 30
 
-# Brand accent used for the headline highlight + logo mark.
-ACCENT_COLOR = (196, 44, 44)
+# Accent colors
+ACCENT_RED = (196, 44, 44)
+HIGHLIGHT_GOLD = (255, 200, 20)
+PAPER_BASE = (246, 245, 241)
+INK_BLACK = (24, 24, 24)
+MUTED_GRAY = (120, 118, 114)
 
 WHITE = (255, 255, 255)
-BLACK = (20, 20, 20)
-GRAY = (120, 120, 120)
 
-# Fraction of the headline (by word count) that gets the red
+# Fraction of the headline (by word count) that gets the gold
 # highlight treatment, read left-to-right from the first word.
-# Tune with HIGHLIGHT_WORD_RATIO in the environment if needed.
-HIGHLIGHT_WORD_RATIO = float(
-    os.getenv("HIGHLIGHT_WORD_RATIO", "0.65")
-)
+HIGHLIGHT_WORD_RATIO = float(os.getenv("HIGHLIGHT_WORD_RATIO", "0.6"))
 
-# Small watermark drawn in the bottom-right corner of the photo.
+# Bottom-left brand wordmark drawn over the photo.
 BRAND_MARK = os.getenv("BRAND_MARK", "TN")
+BRAND_TAGLINE = os.getenv("BRAND_TAGLINE", "NEWS • BANGLADESH")
 
 
 # ============================================================
@@ -97,16 +114,11 @@ required = {
     "FACEBOOK_PAGE_ACCESS_TOKEN": FACEBOOK_PAGE_ACCESS_TOKEN,
 }
 
-missing = [
-    key
-    for key, value in required.items()
-    if not value
-]
+missing = [key for key, value in required.items() if not value]
 
 if missing:
     raise RuntimeError(
-        "Missing environment variables: "
-        + ", ".join(missing)
+        "Missing environment variables: " + ", ".join(missing)
     )
 
 
@@ -114,31 +126,47 @@ if missing:
 # SUPABASE
 # ============================================================
 
-supabase: Client = create_client(
-    SUPABASE_URL,
-    SUPABASE_KEY
-)
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 
 # ============================================================
-# HTTP SESSION
+# HTTP SESSIONS (with retry/backoff so transient network blips
+# don't turn into hard failures)
 # ============================================================
 
-session = requests.Session()
+def _build_session(total_retries=3):
+    s = requests.Session()
 
-session.headers.update({
-    "User-Agent": (
-        "Mozilla/5.0 (X11; Linux x86_64) "
-        "AppleWebKit/537.36 "
-        "(KHTML, like Gecko) "
-        "Chrome/131.0 Safari/537.36"
-    ),
-    "Accept": (
-        "text/html,application/xhtml+xml,"
-        "application/xml;q=0.9,image/avif,"
-        "image/webp,*/*;q=0.8"
-    ),
-})
+    retry = Retry(
+        total=total_retries,
+        backoff_factor=1.5,
+        status_forcelist=[429, 500, 502, 503, 504],
+        allowed_methods=["GET", "POST"],
+        raise_on_status=False,
+    )
+
+    adapter = HTTPAdapter(max_retries=retry)
+    s.mount("https://", adapter)
+    s.mount("http://", adapter)
+
+    s.headers.update({
+        "User-Agent": (
+            "Mozilla/5.0 (X11; Linux x86_64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/131.0 Safari/537.36"
+        ),
+        "Accept": (
+            "text/html,application/xhtml+xml,"
+            "application/xml;q=0.9,image/avif,"
+            "image/webp,*/*;q=0.8"
+        ),
+    })
+
+    return s
+
+
+session = _build_session()          # for scraping article pages / images
+fb_session = _build_session(total_retries=FACEBOOK_MAX_RETRIES)  # for Graph API
 
 
 # ============================================================
@@ -146,8 +174,6 @@ session.headers.update({
 # ============================================================
 
 def find_font_file(names):
-    """Find one of the requested font filenames."""
-
     direct_roots = [
         "/usr/share/fonts/truetype/noto",
         "/usr/share/fonts/opentype/noto",
@@ -157,404 +183,166 @@ def find_font_file(names):
     for root in direct_roots:
         for name in names:
             path = os.path.join(root, name)
-
             if os.path.exists(path):
                 return path
 
-    for root in [
-        "/usr/share/fonts",
-        "/usr/local/share/fonts",
-    ]:
-
+    for root in ["/usr/share/fonts", "/usr/local/share/fonts"]:
         if not os.path.exists(root):
             continue
-
         for dirpath, _, filenames in os.walk(root):
-
             for name in names:
-
                 if name in filenames:
-
-                    return os.path.join(
-                        dirpath,
-                        name
-                    )
+                    return os.path.join(dirpath, name)
 
     return None
 
 
+_FONT_CACHE = {}
+
+
 def get_font(size, bold=False, bengali=False):
     """
-    Bengali text:
-        Noto Sans Bengali
-
-    English/numbers:
-        DejaVu Sans
-
-    We intentionally keep the fonts separate so a mixed title
-    never renders English characters as missing-glyph boxes.
+    Bengali text -> Noto Sans Bengali
+    English/numbers -> DejaVu Sans
+    Kept separate so a mixed title never renders missing-glyph boxes.
+    Cached so repeated calls (auto-shrink loop) stay fast.
     """
 
+    cache_key = (size, bold, bengali)
+    if cache_key in _FONT_CACHE:
+        return _FONT_CACHE[cache_key]
+
     if bengali:
-
-        if bold:
-            names = [
-                "NotoSansBengali-Bold.ttf",
-                "NotoSansBengaliUI-Bold.ttf",
-            ]
-        else:
-            names = [
-                "NotoSansBengali-Regular.ttf",
-                "NotoSansBengaliUI-Regular.ttf",
-            ]
-
+        names = (
+            ["NotoSansBengali-Bold.ttf", "NotoSansBengaliUI-Bold.ttf"]
+            if bold else
+            ["NotoSansBengali-Regular.ttf", "NotoSansBengaliUI-Regular.ttf"]
+        )
         font_path = find_font_file(names)
-
         if not font_path:
             raise RuntimeError(
                 "Noto Sans Bengali was not found. "
                 "Install fonts-noto-core and fonts-noto-extra."
             )
-
     else:
-
-        if bold:
-            names = [
-                "DejaVuSans-Bold.ttf",
-            ]
-        else:
-            names = [
-                "DejaVuSans.ttf",
-            ]
-
+        names = ["DejaVuSans-Bold.ttf"] if bold else ["DejaVuSans.ttf"]
         font_path = find_font_file(names)
-
         if not font_path:
-            raise RuntimeError(
-                "DejaVu Sans was not found."
-            )
+            raise RuntimeError("DejaVu Sans was not found.")
 
-    print(f"Font: {font_path}")
-
-    return ImageFont.truetype(
-        font_path,
-        size
-    )
+    font = ImageFont.truetype(font_path, size)
+    _FONT_CACHE[cache_key] = font
+    return font
 
 
 def verify_text_rendering_support():
-    """
-    Verify that Pillow has RAQM support when available.
-
-    RAQM gives proper complex-script shaping for Bengali.
-    """
-
     try:
-
         if features.check("raqm"):
-
-            print(
-                "✓ Pillow RAQM support: ENABLED"
-            )
-
+            print("✓ Pillow RAQM support: ENABLED")
         else:
-
-            print(
-                "⚠ Pillow RAQM support: NOT AVAILABLE"
-            )
-
+            print("⚠ Pillow RAQM support: NOT AVAILABLE")
             print(
                 "Bengali rendering may be imperfect. "
                 "Install libraqm-dev before installing Pillow."
             )
-
     except Exception as e:
-
-        print(
-            f"⚠ Could not check RAQM support: {e}"
-        )
+        print(f"⚠ Could not check RAQM support: {e}")
 
 
 # ============================================================
-# BENGALI DETECTION
-# ============================================================
-
-def contains_bengali(text):
-    if not text:
-        return False
-
-    return any(
-        "\u0980" <= char <= "\u09FF"
-        for char in text
-    )
-
-
-# ============================================================
-# MIXED TEXT RUNS
+# MIXED BENGALI/LATIN TEXT RUNS, MEASUREMENT, DRAWING, WRAPPING
 # ============================================================
 
 def get_mixed_runs(text):
-    """
-    Split text into Bengali and non-Bengali runs.
-
-    Example:
-        বাংলা News Update
-
-    becomes:
-        বাংলা       -> Bengali font
-         News Update -> Latin font
-    """
-
     if not text:
         return []
 
     runs = []
-
     current = ""
     current_is_bengali = None
 
     for char in text:
-
-        is_bengali = (
-            "\u0980" <= char <= "\u09FF"
-        )
+        is_bengali = "\u0980" <= char <= "\u09FF"
 
         if current_is_bengali is None:
-
             current = char
             current_is_bengali = is_bengali
-
         elif is_bengali == current_is_bengali:
-
             current += char
-
         else:
-
-            runs.append(
-                (
-                    current,
-                    current_is_bengali
-                )
-            )
-
+            runs.append((current, current_is_bengali))
             current = char
             current_is_bengali = is_bengali
 
     if current:
-
-        runs.append(
-            (
-                current,
-                current_is_bengali
-            )
-        )
+        runs.append((current, current_is_bengali))
 
     return runs
 
 
-# ============================================================
-# TEXT MEASUREMENT
-# ============================================================
-
-def text_bbox_for_run(
-    draw,
-    text,
-    font,
-    is_bengali
-):
-    """
-    Measure one text run.
-
-    Bengali uses language='bn' when RAQM is available.
-    """
-
+def text_bbox_for_run(draw, text, font, is_bengali):
     kwargs = {}
-
     if features.check("raqm"):
-
         kwargs["direction"] = "ltr"
-        kwargs["language"] = (
-            "bn"
-            if is_bengali
-            else "en"
-        )
-
-    return draw.textbbox(
-        (0, 0),
-        text,
-        font=font,
-        **kwargs
-    )
+        kwargs["language"] = "bn" if is_bengali else "en"
+    return draw.textbbox((0, 0), text, font=font, **kwargs)
 
 
-def mixed_text_width(
-    draw,
-    text,
-    bengali_font,
-    latin_font
-):
-
+def mixed_text_width(draw, text, bengali_font, latin_font):
     total_width = 0
-
     for run, is_bengali in get_mixed_runs(text):
-
-        font = (
-            bengali_font
-            if is_bengali
-            else latin_font
-        )
-
-        bbox = text_bbox_for_run(
-            draw,
-            run,
-            font,
-            is_bengali
-        )
-
-        total_width += (
-            bbox[2] - bbox[0]
-        )
-
+        font = bengali_font if is_bengali else latin_font
+        bbox = text_bbox_for_run(draw, run, font, is_bengali)
+        total_width += (bbox[2] - bbox[0])
     return total_width
 
 
-def mixed_text_height(
-    draw,
-    text,
-    bengali_font,
-    latin_font
-):
-
+def mixed_text_height(draw, text, bengali_font, latin_font):
     height = 0
-
     for run, is_bengali in get_mixed_runs(text):
-
-        font = (
-            bengali_font
-            if is_bengali
-            else latin_font
-        )
-
-        bbox = text_bbox_for_run(
-            draw,
-            run,
-            font,
-            is_bengali
-        )
-
-        height = max(
-            height,
-            bbox[3] - bbox[1]
-        )
-
+        font = bengali_font if is_bengali else latin_font
+        bbox = text_bbox_for_run(draw, run, font, is_bengali)
+        height = max(height, bbox[3] - bbox[1])
     return height
 
 
-# ============================================================
-# DRAW MIXED TEXT
-# ============================================================
-
-def draw_mixed_text(
-    draw,
-    position,
-    text,
-    bengali_font,
-    latin_font,
-    fill
-):
-
+def draw_mixed_text(draw, position, text, bengali_font, latin_font, fill):
     x, y = position
-
     for run, is_bengali in get_mixed_runs(text):
-
-        font = (
-            bengali_font
-            if is_bengali
-            else latin_font
-        )
-
+        font = bengali_font if is_bengali else latin_font
         kwargs = {}
-
         if features.check("raqm"):
-
             kwargs["direction"] = "ltr"
-            kwargs["language"] = (
-                "bn"
-                if is_bengali
-                else "en"
-            )
+            kwargs["language"] = "bn" if is_bengali else "en"
 
-        draw.text(
-            (x, y),
-            run,
-            font=font,
-            fill=fill,
-            **kwargs
-        )
-
-        bbox = text_bbox_for_run(
-            draw,
-            run,
-            font,
-            is_bengali
-        )
-
-        x += (
-            bbox[2] - bbox[0]
-        )
-
+        draw.text((x, y), run, font=font, fill=fill, **kwargs)
+        bbox = text_bbox_for_run(draw, run, font, is_bengali)
+        x += (bbox[2] - bbox[0])
     return x
 
 
-# ============================================================
-# WRAP MIXED TEXT (word-aware, keeps word boundaries so we can
-# later figure out which words fall in the "highlighted" prefix)
-# ============================================================
-
-def wrap_text_words(
-    draw,
-    text,
-    bengali_font,
-    latin_font,
-    max_width
-):
+def wrap_text_words(draw, text, bengali_font, latin_font, max_width):
     """
-    Same wrapping behaviour as before, but returns a list of
-    *word lists* (one list per line) instead of joined strings,
-    so the caller can re-associate each word with its global
-    index in the headline.
+    Word-aware wrap that returns a list of word-lists (one per line)
+    so highlight boundaries can be re-associated with global word index.
     """
-
     words = text.split()
-
     lines = []
     current_words = []
 
     for word in words:
-
         test_words = current_words + [word]
-
-        test = " ".join(test_words)
-
         width = mixed_text_width(
-            draw,
-            test,
-            bengali_font,
-            latin_font
+            draw, " ".join(test_words), bengali_font, latin_font
         )
 
         if width <= max_width or not current_words:
-
             current_words = test_words
-
         else:
-
             lines.append(current_words)
-
             current_words = [word]
 
     if current_words:
-
         lines.append(current_words)
 
     return lines
@@ -565,48 +353,20 @@ def wrap_text_words(
 # ============================================================
 
 def is_generic_image(url):
-
     if not url:
         return True
 
     lower = url.lower()
 
-    # IMPORTANT:
-    # social_share and share-image are intentionally NOT
-    # considered generic because TBS can use them for real
-    # article photos.
-
     bad_patterns = [
-
-        "banner.png",
-        "banner.jpg",
-        "banner.jpeg",
-
-        "/logo.",
-        "logo.png",
-        "logo.jpg",
-        "logo.jpeg",
-
-        "default.jpg",
-        "default.png",
-        "default.jpeg",
-
-        "placeholder",
-
-        "og-default",
-        "fallback",
-
-        "avatar",
-
-        "/icon.",
-        "icon.png",
-        "icon.jpg",
+        "banner.png", "banner.jpg", "banner.jpeg",
+        "/logo.", "logo.png", "logo.jpg", "logo.jpeg",
+        "default.jpg", "default.png", "default.jpeg",
+        "placeholder", "og-default", "fallback",
+        "avatar", "/icon.", "icon.png", "icon.jpg",
     ]
 
-    return any(
-        pattern in lower
-        for pattern in bad_patterns
-    )
+    return any(pattern in lower for pattern in bad_patterns)
 
 
 # ============================================================
@@ -614,71 +374,32 @@ def is_generic_image(url):
 # ============================================================
 
 def download_image(url):
-
     if not url:
         return None
 
     try:
+        print(f"Downloading image: {url}")
 
-        print(
-            f"Downloading image: {url}"
-        )
-
-        response = session.get(
-            url,
-            timeout=REQUEST_TIMEOUT,
-            allow_redirects=True
-        )
-
+        response = session.get(url, timeout=REQUEST_TIMEOUT, allow_redirects=True)
         response.raise_for_status()
 
-        content_type = (
-            response.headers
-            .get("Content-Type", "")
-            .lower()
-        )
+        content_type = response.headers.get("Content-Type", "").lower()
 
         if (
             not content_type.startswith("image/")
-            and not url.lower().endswith(
-                (
-                    ".jpg",
-                    ".jpeg",
-                    ".png",
-                    ".webp",
-                    ".gif",
-                )
-            )
+            and not url.lower().endswith((".jpg", ".jpeg", ".png", ".webp", ".gif"))
         ):
-
-            print(
-                f"✗ Not an image response: "
-                f"{content_type}"
-            )
-
+            print(f"✗ Not an image response: {content_type}")
             return None
 
-        image = Image.open(
-            io.BytesIO(
-                response.content
-            )
-        )
-
+        image = Image.open(io.BytesIO(response.content))
         image.load()
 
-        print(
-            f"✓ Image downloaded "
-            f"({image.width}, {image.height})"
-        )
-
+        print(f"✓ Image downloaded ({image.width}, {image.height})")
         return image.convert("RGB")
 
     except Exception as e:
-
-        print(
-            f"✗ Image download failed: {e}"
-        )
-
+        print(f"✗ Image download failed: {e}")
         return None
 
 
@@ -687,22 +408,11 @@ def download_image(url):
 # ============================================================
 
 def clean_description(text):
-    """
-    Clean a website description/excerpt and keep it short.
-    """
-
     if not text:
         return ""
 
-    text = re.sub(
-        r"\s+",
-        " ",
-        str(text)
-    ).strip()
-
-    text = text.strip(
-        " \t\r\n\"'“”‘’"
-    )
+    text = re.sub(r"\s+", " ", str(text)).strip()
+    text = text.strip(" \t\r\n\"'\u201c\u201d\u2018\u2019")
 
     if not text:
         return ""
@@ -710,205 +420,72 @@ def clean_description(text):
     if len(text) <= DESCRIPTION_MAX_CHARS:
         return text
 
-    shortened = text[
-        :DESCRIPTION_MAX_CHARS
-    ].rsplit(" ", 1)[0].strip()
-
+    shortened = text[:DESCRIPTION_MAX_CHARS].rsplit(" ", 1)[0].strip()
     if not shortened:
-        shortened = text[
-            :DESCRIPTION_MAX_CHARS
-        ].strip()
+        shortened = text[:DESCRIPTION_MAX_CHARS].strip()
 
     return shortened + "…"
 
 
 def extract_website_description(article_url):
-    """
-    Extract a short description from the article page.
-
-    Priority:
-      1. meta[name='description']
-      2. og:description
-      3. twitter:description
-      4. first meaningful article paragraph
-    """
-
     if not article_url:
         return ""
 
     try:
-
-        print(
-            "Opening article page to find "
-            "website description..."
-        )
-
-        response = session.get(
-            article_url,
-            timeout=REQUEST_TIMEOUT
-        )
-
+        print("Opening article page to find website description...")
+        response = session.get(article_url, timeout=REQUEST_TIMEOUT)
         response.raise_for_status()
 
-        soup = BeautifulSoup(
-            response.text,
-            "html.parser"
-        )
+        soup = BeautifulSoup(response.text, "html.parser")
 
-        # ----------------------------------------------------
-        # Standard meta description
-        # ----------------------------------------------------
-
-        meta = soup.find(
-            "meta",
-            attrs={
-                "name": "description"
-            }
-        )
-
+        meta = soup.find("meta", attrs={"name": "description"})
         if meta and meta.get("content"):
-
-            description = clean_description(
-                meta["content"]
-            )
-
+            description = clean_description(meta["content"])
             if description:
-
-                print(
-                    "✓ Website description found "
-                    "from meta description"
-                )
-
+                print("✓ Website description found from meta description")
                 return description
 
-        # ----------------------------------------------------
-        # OpenGraph description
-        # ----------------------------------------------------
-
-        og = soup.find(
-            "meta",
-            property="og:description"
-        )
-
+        og = soup.find("meta", property="og:description")
         if og and og.get("content"):
-
-            description = clean_description(
-                og["content"]
-            )
-
+            description = clean_description(og["content"])
             if description:
-
-                print(
-                    "✓ Website description found "
-                    "from og:description"
-                )
-
+                print("✓ Website description found from og:description")
                 return description
 
-        # ----------------------------------------------------
-        # Twitter description
-        # ----------------------------------------------------
-
-        twitter = soup.find(
-            "meta",
-            attrs={
-                "name": "twitter:description"
-            }
-        )
-
+        twitter = soup.find("meta", attrs={"name": "twitter:description"})
         if twitter and twitter.get("content"):
-
-            description = clean_description(
-                twitter["content"]
-            )
-
+            description = clean_description(twitter["content"])
             if description:
-
-                print(
-                    "✓ Website description found "
-                    "from twitter:description"
-                )
-
+                print("✓ Website description found from twitter:description")
                 return description
-
-        # ----------------------------------------------------
-        # Fallback: first meaningful article paragraph
-        # ----------------------------------------------------
 
         selectors = [
-            "article p",
-            "[itemprop='articleBody'] p",
-            ".article-body p",
-            ".article-content p",
-            ".story-body p",
-            ".story-content p",
-            "main p",
+            "article p", "[itemprop='articleBody'] p", ".article-body p",
+            ".article-content p", ".story-body p", ".story-content p", "main p",
         ]
 
         for selector in selectors:
-
-            for paragraph in soup.select(
-                selector
-            ):
-
-                text = paragraph.get_text(
-                    " ",
-                    strip=True
-                )
-
-                text = clean_description(
-                    text
-                )
-
-                # Ignore very short UI labels/captions.
+            for paragraph in soup.select(selector):
+                text = paragraph.get_text(" ", strip=True)
+                text = clean_description(text)
                 if len(text) >= 40:
-
-                    print(
-                        "✓ Website description found "
-                        "from first article paragraph"
-                    )
-
+                    print("✓ Website description found from first article paragraph")
                     return text
 
-        print(
-            "⚠ No website description found."
-        )
-
+        print("⚠ No website description found.")
         return ""
 
     except Exception as e:
-
-        print(
-            f"⚠ Description extraction failed: {e}"
-        )
-
+        print(f"⚠ Description extraction failed: {e}")
         return ""
 
 
-def get_article_description(
-    stored_description,
-    article_url
-):
-    """
-    Prefer the description already stored in Supabase.
-    If it is missing, fetch it from the article page.
-    """
-
-    description = clean_description(
-        stored_description
-    )
-
+def get_article_description(stored_description, article_url):
+    description = clean_description(stored_description)
     if description:
-
-        print(
-            f"Stored description: {description}"
-        )
-
+        print(f"Stored description: {description}")
         return description
-
-    return extract_website_description(
-        article_url
-    )
+    return extract_website_description(article_url)
 
 
 # ============================================================
@@ -916,330 +493,169 @@ def get_article_description(
 # ============================================================
 
 def extract_article_image(article_url):
-
     if not article_url:
         return None
 
     try:
-
-        print(
-            "Opening article page to find "
-            "actual article image..."
-        )
-
-        response = session.get(
-            article_url,
-            timeout=REQUEST_TIMEOUT
-        )
-
+        print("Opening article page to find actual article image...")
+        response = session.get(article_url, timeout=REQUEST_TIMEOUT)
         response.raise_for_status()
 
-        soup = BeautifulSoup(
-            response.text,
-            "html.parser"
-        )
+        soup = BeautifulSoup(response.text, "html.parser")
 
-        # ----------------------------------------------------
-        # OpenGraph
-        # ----------------------------------------------------
-
-        og = soup.find(
-            "meta",
-            property="og:image"
-        )
-
-        if (
-            og
-            and og.get("content")
-        ):
-
-            image_url = urljoin(
-                article_url,
-                og["content"].strip()
-            )
-
-            if not is_generic_image(
-                image_url
-            ):
-
-                print(
-                    f"✓ Found og:image: "
-                    f"{image_url}"
-                )
-
+        og = soup.find("meta", property="og:image")
+        if og and og.get("content"):
+            image_url = urljoin(article_url, og["content"].strip())
+            if not is_generic_image(image_url):
+                print(f"✓ Found og:image: {image_url}")
                 return image_url
 
-        # ----------------------------------------------------
-        # Twitter
-        # ----------------------------------------------------
-
-        twitter = soup.find(
-            "meta",
-            attrs={
-                "name": "twitter:image"
-            }
-        )
-
-        if (
-            twitter
-            and twitter.get("content")
-        ):
-
-            image_url = urljoin(
-                article_url,
-                twitter["content"].strip()
-            )
-
-            if not is_generic_image(
-                image_url
-            ):
-
-                print(
-                    f"✓ Found twitter:image: "
-                    f"{image_url}"
-                )
-
+        twitter = soup.find("meta", attrs={"name": "twitter:image"})
+        if twitter and twitter.get("content"):
+            image_url = urljoin(article_url, twitter["content"].strip())
+            if not is_generic_image(image_url):
+                print(f"✓ Found twitter:image: {image_url}")
                 return image_url
 
-        # ----------------------------------------------------
-        # JSON-LD
-        # ----------------------------------------------------
-
-        for script in soup.find_all(
-            "script",
-            type="application/ld+json"
-        ):
-
+        for script in soup.find_all("script", type="application/ld+json"):
             try:
-
-                raw = (
-                    script.string
-                    or script.get_text()
-                )
-
+                raw = script.string or script.get_text()
                 if not raw.strip():
                     continue
 
                 data = json.loads(raw)
-
-                objects = (
-                    data
-                    if isinstance(data, list)
-                    else [data]
-                )
+                objects = data if isinstance(data, list) else [data]
 
                 for obj in objects:
-
-                    if not isinstance(
-                        obj,
-                        dict
-                    ):
+                    if not isinstance(obj, dict):
                         continue
 
-                    image = obj.get(
-                        "image"
-                    )
+                    image = obj.get("image")
 
-                    if isinstance(
-                        image,
-                        str
-                    ):
-
-                        image_url = urljoin(
-                            article_url,
-                            image
-                        )
-
-                        if not is_generic_image(
-                            image_url
-                        ):
-
-                            print(
-                                "✓ Found "
-                                "JSON-LD image"
-                            )
-
+                    if isinstance(image, str):
+                        image_url = urljoin(article_url, image)
+                        if not is_generic_image(image_url):
+                            print("✓ Found JSON-LD image")
                             return image_url
 
-                    elif isinstance(
-                        image,
-                        dict
-                    ):
-
-                        image_url = image.get(
-                            "url"
-                        )
-
+                    elif isinstance(image, dict):
+                        image_url = image.get("url")
                         if image_url:
-
-                            image_url = urljoin(
-                                article_url,
-                                image_url
-                            )
-
-                            if not is_generic_image(
-                                image_url
-                            ):
-
-                                print(
-                                    "✓ Found "
-                                    "JSON-LD image"
-                                )
-
+                            image_url = urljoin(article_url, image_url)
+                            if not is_generic_image(image_url):
+                                print("✓ Found JSON-LD image")
                                 return image_url
 
-                    elif isinstance(
-                        image,
-                        list
-                    ):
-
+                    elif isinstance(image, list):
                         for item in image:
-
-                            if isinstance(
-                                item,
-                                str
-                            ):
-
-                                image_url = urljoin(
-                                    article_url,
-                                    item
-                                )
-
-                                if not is_generic_image(
-                                    image_url
-                                ):
-
-                                    print(
-                                        "✓ Found "
-                                        "JSON-LD image"
-                                    )
-
+                            if isinstance(item, str):
+                                image_url = urljoin(article_url, item)
+                                if not is_generic_image(image_url):
+                                    print("✓ Found JSON-LD image")
                                     return image_url
 
             except Exception:
                 continue
 
-        print(
-            "✗ Could not find actual "
-            "article image."
-        )
-
+        print("✗ Could not find actual article image.")
         return None
 
     except Exception as e:
-
-        print(
-            f"✗ Article page image "
-            f"extraction failed: {e}"
-        )
-
+        print(f"✗ Article page image extraction failed: {e}")
         return None
 
 
-# ============================================================
-# RESOLVE ARTICLE IMAGE
-# ============================================================
-
-def resolve_article_image(
-    stored_image,
-    article_url
-):
-
-    # FIRST:
-    # Try the stored image.
-    #
-    # This is important for TBS social_share images.
-
+def resolve_article_image(stored_image, article_url):
     if stored_image:
+        print(f"Stored image: {stored_image}")
 
-        print(
-            f"Stored image: {stored_image}"
-        )
-
-        if not is_generic_image(
-            stored_image
-        ):
-
-            print(
-                "Stored image appears to be "
-                "an article image."
-            )
-
-            image = download_image(
-                stored_image
-            )
-
+        if not is_generic_image(stored_image):
+            print("Stored image appears to be an article image.")
+            image = download_image(stored_image)
             if image is not None:
-
                 return image
-
-            print(
-                "Stored image download failed."
-            )
-
+            print("Stored image download failed.")
         else:
+            print("⚠ Stored image looks like banner/logo/default.")
 
-            print(
-                "⚠ Stored image looks like "
-                "banner/logo/default."
-            )
-
-    # SECOND:
-    # Search article page metadata.
-
-    actual_url = extract_article_image(
-        article_url
-    )
-
+    actual_url = extract_article_image(article_url)
     if actual_url:
-
-        image = download_image(
-            actual_url
-        )
-
+        image = download_image(actual_url)
         if image is not None:
-
             return image
 
-    print(
-        "✗ No usable article image found."
-    )
-
+    print("✗ No usable article image found.")
     return None
 
 
 # ============================================================
-# CROP IMAGE TO SQUARE
+# FULL, UNCROPPED IMAGE PLACEMENT
 # ============================================================
 
-def crop_to_square(image):
+def fit_image_contain(image, target_w, target_h):
+    """
+    Scale the image so it fits ENTIRELY inside target_w x target_h
+    with no cropping (letterbox/pillarbox as needed). Guarantees the
+    whole news photo stays visible.
+    """
+    img_ratio = image.width / image.height
+    target_ratio = target_w / target_h
 
-    width, height = image.size
+    if img_ratio > target_ratio:
+        new_w = target_w
+        new_h = max(1, round(target_w / img_ratio))
+    else:
+        new_h = target_h
+        new_w = max(1, round(target_h * img_ratio))
 
-    size = min(
-        width,
-        height
+    resized = image.resize((new_w, new_h), Image.Resampling.LANCZOS)
+    return resized, new_w, new_h
+
+
+def build_photo_panel(image, target_w, target_h):
+    """
+    Modern "letterbox with blurred fill" panel, like Instagram/FB use
+    for photos that don't match the feed's aspect ratio:
+      - a softly blurred, darkened, cropped-to-cover copy fills the
+        whole frame so there's never an empty bar
+      - the full original photo is placed on top, untouched and
+        fully visible
+    """
+
+    # Blurred cover background (this copy MAY be cropped — it's only
+    # decorative filler, the real photo on top is never cropped).
+    background = ImageOps.fit(
+        image, (target_w, target_h), Image.Resampling.LANCZOS
+    )
+    background = background.filter(ImageFilter.GaussianBlur(36))
+
+    dark_layer = Image.new("RGB", (target_w, target_h), (0, 0, 0))
+    background = Image.blend(background, dark_layer, 0.45)
+
+    # Full, uncropped photo centered on top.
+    foreground, fw, fh = fit_image_contain(image, target_w, target_h)
+
+    panel = background.convert("RGB")
+    paste_x = (target_w - fw) // 2
+    paste_y = (target_h - fh) // 2
+    panel.paste(foreground, (paste_x, paste_y))
+
+    return panel, (paste_x, paste_y, fw, fh)
+
+
+# ============================================================
+# PAPER-STYLE EDITORIAL BACKGROUND
+# ============================================================
+
+def make_editorial_background(width, height, base_color=PAPER_BASE):
+    bg = Image.new("RGB", (width, height), base_color)
+
+    noise = Image.effect_noise((width, height), 20).convert("L")
+    noise_rgb = ImageOps.colorize(
+        noise, black=(215, 213, 208), white=(255, 255, 255)
     )
 
-    left = (
-        width - size
-    ) // 2
-
-    top = (
-        height - size
-    ) // 2
-
-    right = left + size
-    bottom = top + size
-
-    return image.crop(
-        (
-            left,
-            top,
-            right,
-            bottom
-        )
-    )
+    return Image.blend(bg, noise_rgb, 0.10)
 
 
 # ============================================================
@@ -1247,30 +663,17 @@ def crop_to_square(image):
 # ============================================================
 
 def format_display_date(published_at):
-    """
-    Turns a Supabase timestamp (ISO 8601, e.g.
-    '2026-09-03T10:15:00+00:00') into the display form used on
-    the card, e.g. '3 SEPTEMBER 2026'.
-
-    Falls back to today's date if parsing fails or the value is
-    missing.
-    """
-
     dt = None
 
     if published_at:
-
         try:
-
             cleaned = published_at.replace("Z", "+00:00")
             dt = datetime.fromisoformat(cleaned)
-
         except Exception:
-
             dt = None
 
     if dt is None:
-        dt = datetime.utcnow()
+        dt = datetime.now(timezone.utc)
 
     return f"{dt.day} {dt.strftime('%B %Y')}".upper()
 
@@ -1280,925 +683,375 @@ def format_display_date(published_at):
 # ============================================================
 
 def build_highlight_flags(total_words, ratio):
-    """
-    Returns the number of leading words (out of total_words)
-    that should get the red-highlight treatment.
-    """
-
     if total_words <= 0:
         return 0
-
     count = round(total_words * ratio)
-
     return max(1, min(total_words, count))
 
 
 # ============================================================
-# DRAW ONE HEADLINE LINE (mixes highlighted + plain segments)
+# SMALL UI HELPERS (pill badges, ribbons)
+# ============================================================
+
+def draw_pill(draw, xy, text, font, fg, bg, pad_x=16, pad_y=8):
+    x, y = xy
+    bbox = draw.textbbox((0, 0), text, font=font)
+    w = bbox[2] - bbox[0]
+    h = bbox[3] - bbox[1]
+
+    draw.rounded_rectangle(
+        (x, y, x + w + 2 * pad_x, y + h + 2 * pad_y),
+        radius=(h + 2 * pad_y) // 2,
+        fill=bg,
+    )
+
+    draw.text((x + pad_x, y + pad_y - bbox[1]), text, font=font, fill=fg)
+
+    return w + 2 * pad_x, h + 2 * pad_y
+
+
+def draw_vertical_watermark(base_rgba, text, font, xy, fill=(255, 255, 255, 190)):
+    """
+    Draws small rotated (bottom-to-top) credit text along the photo's
+    right edge, editorial-style ("Source: X | Picture: Collected").
+    """
+    tmp = Image.new("RGBA", (600, 40), (0, 0, 0, 0))
+    td = ImageDraw.Draw(tmp)
+    td.text((0, 0), text, font=font, fill=fill)
+
+    bbox = td.textbbox((0, 0), text, font=font)
+    tmp = tmp.crop((0, 0, bbox[2] + 4, bbox[3] + 4))
+
+    rotated = tmp.rotate(90, expand=True)
+    base_rgba.alpha_composite(rotated, xy)
+
+
+# ============================================================
+# DRAW ONE HEADLINE LINE (gold-highlighted + plain segments)
 # ============================================================
 
 def draw_headline_line(
-    draw,
-    words,
-    global_start_index,
-    highlight_count,
-    x,
-    y,
-    line_height,
-    bengali_font,
-    latin_font
+    draw, words, global_start_index, highlight_count,
+    x, y, line_height, bengali_font, latin_font,
 ):
-    """
-    Draws a single wrapped headline line, switching between a
-    red-highlighted run (white text on a red box) and plain
-    black text, based on each word's position in the overall
-    headline.
-    """
+    space_width = mixed_text_width(draw, " ", bengali_font, latin_font) or 14
 
-    space_width = mixed_text_width(
-        draw, " ", bengali_font, latin_font
-    ) or 12
-
-    # Group consecutive words that share the same highlight
-    # state into segments so each segment is drawn (and boxed)
-    # as one continuous run.
     segments = []
-
     for i, word in enumerate(words):
-
-        is_highlighted = (
-            (global_start_index + i) < highlight_count
-        )
-
+        is_highlighted = (global_start_index + i) < highlight_count
         if segments and segments[-1][0] == is_highlighted:
-
             segments[-1][1].append(word)
-
         else:
-
             segments.append([is_highlighted, [word]])
 
     cursor_x = x
 
     for is_highlighted, seg_words in segments:
-
         seg_text = " ".join(seg_words)
-
-        seg_width = mixed_text_width(
-            draw, seg_text, bengali_font, latin_font
-        )
+        seg_width = mixed_text_width(draw, seg_text, bengali_font, latin_font)
 
         if is_highlighted:
-
-            draw.rectangle(
+            draw.rounded_rectangle(
                 (
                     cursor_x - HIGHLIGHT_PAD_X,
                     y - HIGHLIGHT_PAD_TOP,
                     cursor_x + seg_width + HIGHLIGHT_PAD_X,
                     y + line_height + HIGHLIGHT_PAD_BOTTOM,
                 ),
-                fill=ACCENT_COLOR,
+                radius=HIGHLIGHT_RADIUS,
+                fill=HIGHLIGHT_GOLD,
             )
-
-            text_color = WHITE
-
+            text_color = INK_BLACK
         else:
+            text_color = INK_BLACK
 
-            text_color = BLACK
-
-        draw_mixed_text(
-            draw,
-            (cursor_x, y),
-            seg_text,
-            bengali_font,
-            latin_font,
-            text_color,
-        )
-
+        draw_mixed_text(draw, (cursor_x, y), seg_text, bengali_font, latin_font, text_color)
         cursor_x += seg_width + space_width
 
 
 # ============================================================
-# CREATE PHOTO CARD (white header + red-highlight headline
-# + source/date line + plain square photo + logo mark)
+# HEADLINE FIT (auto-shrinks font until it fits HEADLINE_MAX_LINES)
 # ============================================================
 
-def create_photo_card(
-    image,
-    title,
-    source,
-    published_at=None
-):
+def fit_headline(measure_draw, title, max_text_width):
+    font_size = HEADLINE_FONT_SIZE
+
+    while True:
+        bengali_font = get_font(font_size, bold=True, bengali=True)
+        latin_font = get_font(font_size, bold=True, bengali=False)
+
+        line_word_lists = wrap_text_words(
+            measure_draw, title, bengali_font, latin_font, max_text_width
+        )
+
+        if len(line_word_lists) <= HEADLINE_MAX_LINES or font_size <= HEADLINE_MIN_FONT_SIZE:
+            break
+
+        font_size -= 4
+
+    truncated = False
+    if len(line_word_lists) > HEADLINE_MAX_LINES:
+        line_word_lists = line_word_lists[:HEADLINE_MAX_LINES]
+        truncated = True
+
+    if truncated and line_word_lists and line_word_lists[-1]:
+        line_word_lists[-1][-1] = line_word_lists[-1][-1] + "…"
+
+    return line_word_lists, bengali_font, latin_font
+
+
+# ============================================================
+# CREATE PHOTO CARD — modern editorial design
+# ============================================================
+
+def create_photo_card(image, title, source, published_at=None):
     """
-    Premium editorial-style Facebook photo card.
-
-    Layout:
-      - clean warm-white editorial header
-      - subtle red premium accent
-      - small source/date metadata
-      - original article photo, edge-to-edge
-      - dark cinematic photo treatment near the bottom
-      - elegant TN brand mark
-      - mixed Bengali + English typography
-
-    The actual article image is kept as the visual foundation.
+    Modern editorial Facebook photo card:
+      - fine-grain "paper" header background
+      - a red "LATEST NEWS" pill + large bold headline with a gold
+        highlighted lead-in phrase (mirrors a proven, high-CTR layout)
+      - source/date meta line
+      - the full news photo (never cropped) on a soft blurred
+        letterbox background, fixed 4:5 frame for a consistent,
+        professional feed look
+      - rotated source credit + brand wordmark over the photo
     """
 
     try:
+        source_bengali_font = get_font(SOURCE_FONT_SIZE, bold=True, bengali=True)
+        source_latin_font = get_font(SOURCE_FONT_SIZE, bold=True, bengali=False)
+        small_font = get_font(19, bold=False, bengali=False)
+        brand_font = get_font(34, bold=True, bengali=False)
+        pill_font = get_font(21, bold=True, bengali=False)
 
-        # ----------------------------------------------------
-        # Fonts
-        # ----------------------------------------------------
+        measure_img = Image.new("RGB", (CARD_WIDTH, 10), PAPER_BASE)
+        measure_draw = ImageDraw.Draw(measure_img)
 
-        headline_bengali_font = get_font(
-            HEADLINE_FONT_SIZE,
-            bold=True,
-            bengali=True
+        max_text_width = CARD_WIDTH - (2 * SIDE_MARGIN)
+
+        # ---------------- Headline (auto-fit) ----------------
+
+        line_word_lists, headline_bengali_font, headline_latin_font = fit_headline(
+            measure_draw, title, max_text_width
         )
 
-        headline_latin_font = get_font(
-            HEADLINE_FONT_SIZE,
-            bold=True,
-            bengali=False
-        )
-
-        source_bengali_font = get_font(
-            SOURCE_FONT_SIZE,
-            bold=True,
-            bengali=True
-        )
-
-        source_latin_font = get_font(
-            SOURCE_FONT_SIZE,
-            bold=True,
-            bengali=False
-        )
-
-        small_latin_font = get_font(
-            19,
-            bold=False,
-            bengali=False
-        )
-
-        brand_font = get_font(
-            32,
-            bold=True,
-            bengali=False
-        )
-
-        # ----------------------------------------------------
-        # Measurement canvas
-        # ----------------------------------------------------
-
-        measure_img = Image.new(
-            "RGB",
-            (CARD_WIDTH, 10),
-            WHITE
-        )
-
-        measure_draw = ImageDraw.Draw(
-            measure_img
-        )
-
-        max_text_width = (
-            CARD_WIDTH
-            - (2 * SIDE_MARGIN)
-        )
-
-        # ----------------------------------------------------
-        # Headline wrapping
-        # ----------------------------------------------------
-
-        line_word_lists = wrap_text_words(
-            measure_draw,
-            title,
-            headline_bengali_font,
-            headline_latin_font,
-            max_text_width
-        )
-
-        truncated = False
-
-        if len(line_word_lists) > HEADLINE_MAX_LINES:
-
-            line_word_lists = (
-                line_word_lists[
-                    :HEADLINE_MAX_LINES
-                ]
-            )
-
-            truncated = True
-
-        if truncated and line_word_lists:
-
-            last_line = line_word_lists[-1]
-
-            if last_line:
-
-                last_line[-1] = (
-                    last_line[-1]
-                    + "..."
-                )
-
-        total_words = sum(
-            len(words)
-            for words in line_word_lists
-        )
-
-        highlight_count = (
-            build_highlight_flags(
-                total_words,
-                HIGHLIGHT_WORD_RATIO
-            )
-        )
+        total_words = sum(len(w) for w in line_word_lists)
+        highlight_count = build_highlight_flags(total_words, HIGHLIGHT_WORD_RATIO)
 
         line_heights = [
             mixed_text_height(
-                measure_draw,
-                " ".join(words),
-                headline_bengali_font,
-                headline_latin_font
+                measure_draw, " ".join(words), headline_bengali_font, headline_latin_font
             )
             for words in line_word_lists
         ]
 
         headline_block_height = (
             sum(line_heights)
-            + HEADLINE_LINE_SPACING
-            * max(
-                0,
-                len(line_word_lists) - 1
-            )
+            + HEADLINE_LINE_SPACING * max(0, len(line_word_lists) - 1)
         )
 
-        # ----------------------------------------------------
-        # Metadata
-        # ----------------------------------------------------
+        # ---------------- Metadata line ----------------
 
-        source_text = (
-            (source or "")
-            .strip()
-            .upper()
+        source_text = (source or "").strip().upper()
+        date_text = format_display_date(published_at)
+        source_line = f"{source_text}  •  {date_text}" if source_text else date_text
+
+        source_line_height = mixed_text_height(
+            measure_draw, source_line, source_bengali_font, source_latin_font
         )
 
-        date_text = format_display_date(
-            published_at
-        )
+        # ---------------- Header sizing ----------------
 
-        source_line = (
-            f"{source_text}  •  {date_text}"
-        )
-
-        source_line_height = (
-            mixed_text_height(
-                measure_draw,
-                source_line,
-                source_bengali_font,
-                source_latin_font
-            )
-        )
-
-        # ----------------------------------------------------
-        # Premium header sizing
-        # ----------------------------------------------------
-
-        accent_bar_height = 7
-
+        pill_h = 40
         header_height = (
             TOP_MARGIN
-            + 18
+            + pill_h
+            + 26
             + headline_block_height
             + GAP_AFTER_HEADLINE
             + source_line_height
             + GAP_AFTER_SOURCE
-            + 18
         )
 
-        photo_height = PHOTO_SIZE
+        card_height = int(header_height) + PHOTO_HEIGHT
 
-        card_height = (
-            header_height
-            + photo_height
-        )
+        # ---------------- Header background ----------------
 
-        # ----------------------------------------------------
-        # Premium white editorial canvas
-        # ----------------------------------------------------
-
-        card = Image.new(
-            "RGB",
-            (
-                CARD_WIDTH,
-                int(card_height)
-            ),
-            (250, 249, 247)
-        )
-
+        card = make_editorial_background(CARD_WIDTH, int(header_height))
         draw = ImageDraw.Draw(card)
 
-        # ----------------------------------------------------
-        # Very subtle top accent
-        # ----------------------------------------------------
+        # thin top accent line
+        draw.rectangle((0, 0, CARD_WIDTH, 6), fill=ACCENT_RED)
 
-        draw.rectangle(
-            (
-                0,
-                0,
-                CARD_WIDTH,
-                accent_bar_height
-            ),
-            fill=ACCENT_COLOR
+        # "LATEST NEWS" pill
+        draw_pill(
+            draw, (SIDE_MARGIN, TOP_MARGIN), "LATEST NEWS",
+            font=pill_font, fg=WHITE, bg=ACCENT_RED,
         )
 
-        # Small editorial label
-        label_font = get_font(
-            18,
-            bold=True,
-            bengali=False
-        )
+        # ---------------- Headline ----------------
 
-        label_text = "LATEST NEWS"
-
-        draw.text(
-            (
-                SIDE_MARGIN,
-                TOP_MARGIN
-            ),
-            label_text,
-            font=label_font,
-            fill=(
-                150,
-                150,
-                150
-            )
-        )
-
-        # ----------------------------------------------------
-        # Headline
-        # ----------------------------------------------------
-
-        y = (
-            TOP_MARGIN
-            + 34
-        )
-
+        y = TOP_MARGIN + pill_h + 26
         global_index = 0
 
-        for words, height in zip(
-            line_word_lists,
-            line_heights
-        ):
-
+        for words, height in zip(line_word_lists, line_heights):
             draw_headline_line(
-                draw,
-                words,
-                global_index,
-                highlight_count,
-                SIDE_MARGIN,
-                y,
-                height,
-                headline_bengali_font,
-                headline_latin_font
+                draw, words, global_index, highlight_count,
+                SIDE_MARGIN, y, height,
+                headline_bengali_font, headline_latin_font,
             )
-
             global_index += len(words)
+            y += height + HEADLINE_LINE_SPACING
 
-            y += (
-                height
-                + HEADLINE_LINE_SPACING
-            )
-
-        # ----------------------------------------------------
-        # Thin editorial divider
-        # ----------------------------------------------------
-
-        divider_y = (
-            y
-            + 2
-        )
-
+        # divider
+        divider_y = y + 4
         draw.line(
-            (
-                SIDE_MARGIN,
-                divider_y,
-                CARD_WIDTH - SIDE_MARGIN,
-                divider_y
-            ),
-            fill=(
-                220,
-                220,
-                220
-            ),
-            width=2
+            (SIDE_MARGIN, divider_y, CARD_WIDTH - SIDE_MARGIN, divider_y),
+            fill=(215, 213, 208), width=2,
         )
 
-        # ----------------------------------------------------
-        # Source/date metadata
-        # ----------------------------------------------------
-
-        metadata_y = (
-            divider_y
-            + 22
-        )
-
+        # source/date meta
+        metadata_y = divider_y + 20
         draw_mixed_text(
-            draw,
-            (
-                SIDE_MARGIN,
-                metadata_y
-            ),
-            source_line,
-            source_bengali_font,
-            source_latin_font,
-            (
-                105,
-                105,
-                105
-            )
+            draw, (SIDE_MARGIN, metadata_y), source_line,
+            source_bengali_font, source_latin_font, MUTED_GRAY,
         )
 
-        # ----------------------------------------------------
-        # Small red accent dot
-        # ----------------------------------------------------
+        dot_x = CARD_WIDTH - SIDE_MARGIN - 10
+        dot_y = metadata_y + max(10, source_line_height // 2)
+        draw.ellipse((dot_x - 6, dot_y - 6, dot_x + 6, dot_y + 6), fill=ACCENT_RED)
 
-        dot_x = (
-            CARD_WIDTH
-            - SIDE_MARGIN
-            - 10
-        )
+        # ---------------- Photo panel (full image, never cropped) ----------------
 
-        dot_y = (
-            metadata_y
-            + max(
-                10,
-                source_line_height // 2
-            )
-        )
+        photo_panel, (fx, fy, fw, fh) = build_photo_panel(image, PHOTO_WIDTH, PHOTO_HEIGHT)
+        photo_y = int(header_height)
 
-        draw.ellipse(
-            (
-                dot_x - 6,
-                dot_y - 6,
-                dot_x + 6,
-                dot_y + 6
-            ),
-            fill=ACCENT_COLOR
-        )
+        base = Image.new("RGBA", (CARD_WIDTH, card_height), (*PAPER_BASE, 255))
+        base.alpha_composite(card.convert("RGBA"), (0, 0))
+        base.paste(photo_panel.convert("RGBA"), (0, photo_y))
 
-        # ----------------------------------------------------
-        # Photo
-        # ----------------------------------------------------
+        draw = ImageDraw.Draw(base)
 
-        photo = crop_to_square(
-            image
-        )
+        # hairline where header meets photo
+        draw.rectangle((0, photo_y, CARD_WIDTH, photo_y + 3), fill=ACCENT_RED)
 
-        photo = photo.resize(
-            (
-                PHOTO_SIZE,
-                PHOTO_SIZE
-            ),
-            Image.Resampling.LANCZOS
-        )
+        # subtle bottom gradient over the photo for legible branding
+        gradient_h = 220
+        gradient = Image.new("RGBA", (CARD_WIDTH, gradient_h), (0, 0, 0, 0))
+        gd = ImageDraw.Draw(gradient)
+        for i in range(gradient_h):
+            alpha = int(150 * (i / gradient_h))
+            gd.line((0, i, CARD_WIDTH, i), fill=(0, 0, 0, alpha))
+        base.alpha_composite(gradient, (0, photo_y + PHOTO_HEIGHT - gradient_h))
 
-        photo_y = int(
-            header_height
-        )
-
-        card.paste(
-            photo,
-            (
-                0,
-                photo_y
-            )
-        )
-
-        # ----------------------------------------------------
-        # Premium photo overlay
-        #
-        # The original image remains underneath.
-        # Only subtle gradients are added for readability.
-        # ----------------------------------------------------
-
-        overlay = Image.new(
-            "RGBA",
-            (
-                CARD_WIDTH,
-                PHOTO_SIZE
-            ),
-            (
-                0,
-                0,
-                0,
-                0
-            )
-        )
-
-        od = ImageDraw.Draw(
-            overlay
-        )
-
-        # Top soft vignette
-        for i in range(180):
-
-            alpha = int(
-                40
-                * (
-                    1
-                    - i / 180
-                )
+        # rotated source credit along the photo's right edge
+        if source_text:
+            credit_text = f"SOURCE: {source_text}  •  IMAGE: COLLECTED"
+            draw_vertical_watermark(
+                base, credit_text, small_font,
+                (CARD_WIDTH - 34, photo_y + PHOTO_HEIGHT - 380),
             )
 
-            od.line(
-                (
-                    0,
-                    i,
-                    CARD_WIDTH,
-                    i
-                ),
-                fill=(
-                    0,
-                    0,
-                    0,
-                    alpha
-                )
-            )
+        # brand wordmark, bottom-left over the photo
+        badge_x = 34
+        badge_y = photo_y + PHOTO_HEIGHT - 34 - 56
 
-        # Bottom cinematic gradient
-        gradient_start = 720
+        bbox = draw.textbbox((0, 0), BRAND_MARK or "TN", font=brand_font)
+        mark_w = bbox[2] - bbox[0]
+        mark_h = bbox[3] - bbox[1]
 
-        for y2 in range(
-            gradient_start,
-            PHOTO_SIZE
-        ):
-
-            progress = (
-                y2 - gradient_start
-            ) / (
-                PHOTO_SIZE
-                - gradient_start
-            )
-
-            alpha = int(
-                8
-                + 145 * progress
-            )
-
-            od.line(
-                (
-                    0,
-                    y2,
-                    CARD_WIDTH,
-                    y2
-                ),
-                fill=(
-                    0,
-                    0,
-                    0,
-                    alpha
-                )
-            )
-
-        # Re-create the final composite cleanly.
-        # Keep every alpha-composited layer exactly the same width
-        # and use RGBA for all alpha-composite operations.
-        base = Image.new(
-            "RGBA",
-            (
-                CARD_WIDTH,
-                int(card_height)
-            ),
-            (
-                250,
-                249,
-                247,
-                255
-            )
-        )
-
-        # Header from original card
-        header_crop = card.crop(
-            (
-                0,
-                0,
-                CARD_WIDTH,
-                photo_y
-            )
-        ).convert("RGBA")
-
-        base.alpha_composite(
-            header_crop,
-            (
-                0,
-                0
-            )
-        )
-
-        # Original photo
-        base.paste(
-            photo.convert("RGBA"),
-            (
-                0,
-                photo_y
-            )
-        )
-
-        # Photo overlay
-        base.paste(
-            overlay,
-            (
-                0,
-                photo_y
-            ),
-            overlay
-        )
-
-        draw = ImageDraw.Draw(
-            base
-        )
-
-        # ----------------------------------------------------
-        # Photo top hairline
-        # ----------------------------------------------------
-
-        draw.rectangle(
-            (
-                0,
-                photo_y,
-                CARD_WIDTH,
-                photo_y + 3
-            ),
-            fill=ACCENT_COLOR
-        )
-
-        # ----------------------------------------------------
-        # Premium bottom source mark
-        # ----------------------------------------------------
-
-        mark_text = (
-            BRAND_MARK
-            or "TN"
-        )
-
-        bbox = draw.textbbox(
-            (0, 0),
-            mark_text,
-            font=brand_font
-        )
-
-        mark_w = (
-            bbox[2]
-            - bbox[0]
-        )
-
-        mark_h = (
-            bbox[3]
-            - bbox[1]
-        )
-
-        mark_margin = 34
-        mark_pad_x = 18
-        mark_pad_y = 12
-
-        badge_x1 = (
-            CARD_WIDTH
-            - mark_margin
-        )
-
-        badge_y1 = (
-            photo_y
-            + PHOTO_SIZE
-            - mark_margin
-        )
-
-        badge_x0 = (
-            badge_x1
-            - mark_w
-            - 2 * mark_pad_x
-        )
-
-        badge_y0 = (
-            badge_y1
-            - mark_h
-            - 2 * mark_pad_y
-        )
-
-        # translucent premium badge
         draw.rounded_rectangle(
-            (
-                badge_x0,
-                badge_y0,
-                badge_x1,
-                badge_y1
-            ),
-            radius=14,
-            fill=(
-                0,
-                0,
-                0,
-                145
-            ),
-            outline=(
-                255,
-                255,
-                255,
-                90
-            ),
-            width=1
+            (badge_x, badge_y, badge_x + mark_w + 36, badge_y + mark_h + 24),
+            radius=12,
+            fill=(0, 0, 0, 150),
+            outline=(255, 255, 255, 90),
+            width=1,
         )
-
         draw.text(
-            (
-                badge_x0
-                + mark_pad_x,
-                badge_y0
-                + mark_pad_y
-                - 2
-            ),
-            mark_text,
-            font=brand_font,
-            fill=WHITE
+            (badge_x + 18, badge_y + 12 - bbox[1]),
+            BRAND_MARK or "TN", font=brand_font, fill=WHITE,
         )
 
-        # ----------------------------------------------------
-        # Tiny editorial line at bottom-left
-        # ----------------------------------------------------
-
-        tiny_text = "NEWS • BANGLADESH"
-
-        tiny_bbox = draw.textbbox(
-            (0, 0),
-            tiny_text,
-            font=small_latin_font
-        )
-
-        tiny_w = (
-            tiny_bbox[2]
-            - tiny_bbox[0]
-        )
-
-        tiny_h = (
-            tiny_bbox[3]
-            - tiny_bbox[1]
-        )
-
-        tiny_x = 36
-
-        tiny_y = (
-            photo_y
-            + PHOTO_SIZE
-            - 38
-            - tiny_h
-        )
-
-        # soft translucent background
-        draw.rounded_rectangle(
-            (
-                tiny_x - 12,
-                tiny_y - 8,
-                tiny_x + tiny_w + 12,
-                tiny_y + tiny_h + 8
-            ),
-            radius=10,
-            fill=(
-                0,
-                0,
-                0,
-                105
+        if BRAND_TAGLINE:
+            tag_bbox = draw.textbbox((0, 0), BRAND_TAGLINE, font=small_font)
+            tag_y = badge_y - 12 - (tag_bbox[3] - tag_bbox[1])
+            draw.rounded_rectangle(
+                (
+                    badge_x - 6, tag_y - 6,
+                    badge_x + (tag_bbox[2] - tag_bbox[0]) + 18, tag_y + (tag_bbox[3] - tag_bbox[1]) + 6,
+                ),
+                radius=8, fill=(0, 0, 0, 105),
             )
-        )
+            draw.text((badge_x + 6, tag_y), BRAND_TAGLINE, font=small_font, fill=(255, 255, 255, 225))
 
-        draw.text(
-            (
-                tiny_x,
-                tiny_y
-            ),
-            tiny_text,
-            font=small_latin_font,
-            fill=(
-                255,
-                255,
-                255,
-                225
-            )
-        )
-
-        # ----------------------------------------------------
-        # Export
-        # ----------------------------------------------------
+        # ---------------- Export ----------------
 
         output = io.BytesIO()
-
-        base.convert(
-            "RGB"
-        ).save(
-            output,
-            format="JPEG",
-            quality=95,
-            optimize=True
-        )
-
+        base.convert("RGB").save(output, format="JPEG", quality=95, optimize=True)
         output.seek(0)
 
-        print(
-            "✓ Premium photo card created"
-        )
+        if output.getbuffer().nbytes == 0:
+            print("✗ Generated photo card is empty.")
+            return None
 
+        print(f"✓ Photo card created ({CARD_WIDTH}x{card_height})")
         return output
 
     except Exception as e:
-
-        print(
-            f"✗ Premium photo card creation "
-            f"failed: {e}"
-        )
-
+        print(f"✗ Photo card creation failed: {e}")
         return None
 
 
 # ============================================================
-# FACEBOOK POST
+# FACEBOOK POST (hardened against common failure modes)
 # ============================================================
 
-def post_to_facebook(
-    photo_bytes,
-    title,
-    description,
-    article_url
-):
+def post_to_facebook(photo_bytes, title, description, article_url):
+    if not photo_bytes or photo_bytes.getbuffer().nbytes == 0:
+        return None, "Photo bytes are empty — nothing to upload."
 
-    endpoint = (
-        f"https://graph.facebook.com/"
-        f"{META_GRAPH_VERSION}/"
-        f"{FACEBOOK_PAGE_ID}/photos"
-    )
+    endpoint = f"https://graph.facebook.com/{META_GRAPH_VERSION}/{FACEBOOK_PAGE_ID}/photos"
 
-    # Facebook caption:
-    # exact title + short website description + article URL.
-    caption_parts = [
-        title.strip()
-    ]
-
+    caption_parts = [title.strip()]
     if description:
-        caption_parts.append(
-            description.strip()
-        )
+        caption_parts.append(description.strip())
+    caption_parts.append(article_url.strip())
 
-    caption_parts.append(
-        article_url.strip()
-    )
+    caption = "\n\n".join(part for part in caption_parts if part)
 
-    caption = "\n\n".join(
-        caption_parts
-    )
+    if len(caption) > CAPTION_MAX_CHARS:
+        caption = caption[:CAPTION_MAX_CHARS].rsplit(" ", 1)[0] + "…"
+
+    photo_bytes.seek(0)
 
     try:
-
-        response = requests.post(
+        response = fb_session.post(
             endpoint,
             data={
-                "access_token":
-                    FACEBOOK_PAGE_ACCESS_TOKEN,
-
-                "caption":
-                    caption,
+                "access_token": FACEBOOK_PAGE_ACCESS_TOKEN,
+                "caption": caption,
+                "published": "true",
             },
-            files={
-                "source": (
-                    "news.jpg",
-                    photo_bytes,
-                    "image/jpeg"
-                )
-            },
-            timeout=60
+            files={"source": ("news.jpg", photo_bytes, "image/jpeg")},
+            timeout=FACEBOOK_TIMEOUT,
         )
 
-        data = response.json()
+        try:
+            data = response.json()
+        except ValueError:
+            return None, f"Non-JSON response (HTTP {response.status_code}): {response.text[:500]}"
 
-        if (
-            response.ok
-            and data.get("id")
-        ):
+        if response.ok and data.get("id"):
+            return data["id"], None
 
-            return (
-                data["id"],
-                None
-            )
+        return None, data.get("error", data)
 
-        return (
-            None,
-            data.get(
-                "error",
-                data
-            )
-        )
-
+    except requests.exceptions.Timeout:
+        return None, "Facebook request timed out."
+    except requests.exceptions.RequestException as e:
+        return None, f"Facebook request failed: {e}"
     except Exception as e:
-
-        return (
-            None,
-            str(e)
-        )
+        return None, str(e)
 
 
 # ============================================================
@@ -2206,32 +1059,14 @@ def post_to_facebook(
 # ============================================================
 
 def get_unposted_news():
-
     result = (
-        supabase
-        .table("news")
-        .select(
-            "id,title,source,image,url,description,published_at"
-        )
-        .eq(
-            "facebook_posted",
-            False
-        )
-        .neq(
-            "source",
-            "The Daily Star"
-        )
-        .not_.is_(
-            "image",
-            "null"
-        )
-        .order(
-            "published_at",
-            desc=True
-        )
-        .limit(
-            MAX_POSTS_PER_RUN
-        )
+        supabase.table("news")
+        .select("id,title,source,image,url,description,published_at")
+        .eq("facebook_posted", False)
+        .neq("source", "The Daily Star")
+        .not_.is_("image", "null")
+        .order("published_at", desc=True)
+        .limit(MAX_POSTS_PER_RUN)
         .execute()
     )
 
@@ -2239,82 +1074,33 @@ def get_unposted_news():
 
 
 # ============================================================
-# MARK POSTED
+# MARK POSTED / SAVE ERROR
 # ============================================================
 
-def mark_posted(
-    news_id,
-    post_id
-):
-
+def mark_posted(news_id, post_id):
     try:
+        supabase.table("news").update({
+            "facebook_posted": True,
+            "facebook_post_id": post_id,
+            "facebook_posted_at": "now()",
+            "facebook_error": None,
+        }).eq("id", news_id).execute()
 
-        supabase.table(
-            "news"
-        ).update({
-
-            "facebook_posted":
-                True,
-
-            "facebook_post_id":
-                post_id,
-
-            "facebook_posted_at":
-                "now()",
-
-            "facebook_error":
-                None,
-
-        }).eq(
-            "id",
-            news_id
-        ).execute()
-
-        print(
-            "✓ Supabase: "
-            "facebook_posted = TRUE"
-        )
+        print("✓ Supabase: facebook_posted = TRUE")
 
     except Exception as e:
-
-        print(
-            "✗ Supabase update failed:",
-            e
-        )
+        print("✗ Supabase update failed:", e)
 
 
-# ============================================================
-# SAVE ERROR
-# ============================================================
-
-def save_error(
-    news_id,
-    error
-):
-
+def save_error(news_id, error):
     try:
-
-        supabase.table(
-            "news"
-        ).update({
-
-            "facebook_error":
-                str(error),
-
-            "facebook_posted":
-                False,
-
-        }).eq(
-            "id",
-            news_id
-        ).execute()
+        supabase.table("news").update({
+            "facebook_error": str(error),
+            "facebook_posted": False,
+        }).eq("id", news_id).execute()
 
     except Exception as e:
-
-        print(
-            "✗ Could not save error:",
-            e
-        )
+        print("✗ Could not save error:", e)
 
 
 # ============================================================
@@ -2322,256 +1108,79 @@ def save_error(
 # ============================================================
 
 def main():
-
-    print(
-        "\n=========================================="
-    )
-
-    print(
-        "Starting Facebook poster..."
-    )
-
-    print(
-        "=========================================="
-    )
-
-    print(
-        f"Graph API: "
-        f"{META_GRAPH_VERSION}"
-    )
-
-    print(
-        f"Maximum posts: "
-        f"{MAX_POSTS_PER_RUN}"
-    )
-
-    print(
-        "Daily Star: SKIPPED"
-    )
+    print("\n==========================================")
+    print("Starting Facebook poster...")
+    print("==========================================")
+    print(f"Graph API: {META_GRAPH_VERSION}")
+    print(f"Maximum posts: {MAX_POSTS_PER_RUN}")
+    print("Daily Star: SKIPPED")
 
     verify_text_rendering_support()
 
-    # --------------------------------------------------------
-    # Get unposted news
-    # --------------------------------------------------------
-
     news = get_unposted_news()
-
-    print(
-        f"Found {len(news)} news."
-    )
+    print(f"Found {len(news)} news.")
 
     posted_count = 0
 
-    # --------------------------------------------------------
-    # Process articles
-    # --------------------------------------------------------
-
     for article in news:
-
-        print(
-            "\n------------------------------------------"
-        )
+        print("\n------------------------------------------")
 
         news_id = article["id"]
+        title = article.get("title") or "Untitled"
+        source = article.get("source") or ""
+        article_url = article.get("url") or ""
+        stored_image = article.get("image")
+        published_at = article.get("published_at")
+        stored_description = article.get("description") or ""
 
-        title = (
-            article.get("title")
-            or "Untitled"
-        )
-
-        source = (
-            article.get("source")
-            or ""
-        )
-
-        article_url = (
-            article.get("url")
-            or ""
-        )
-
-        stored_image = (
-            article.get("image")
-        )
-
-        published_at = (
-            article.get("published_at")
-        )
-
-        stored_description = (
-            article.get("description")
-            or ""
-        )
-
-        print(
-            f"Processing: {title}"
-        )
-
-        print(
-            f"Source: {source}"
-        )
-
-        print(
-            f"Article URL: {article_url}"
-        )
+        print(f"Processing: {title}")
+        print(f"Source: {source}")
+        print(f"Article URL: {article_url}")
 
         try:
-
-            # ------------------------------------------------
-            # WEBSITE DESCRIPTION
-            # ------------------------------------------------
-
-            description = get_article_description(
-                stored_description,
-                article_url
-            )
-
+            description = get_article_description(stored_description, article_url)
             if description:
-                print(
-                    f"✓ Description ready: {description}"
-                )
+                print(f"✓ Description ready: {description}")
             else:
-                print(
-                    "⚠ No description will be added."
-                )
+                print("⚠ No description will be added.")
 
-            # ------------------------------------------------
-            # IMAGE
-            # ------------------------------------------------
-
-            image = resolve_article_image(
-                stored_image,
-                article_url
-            )
+            image = resolve_article_image(stored_image, article_url)
 
             if image is None:
-
-                error = (
-                    "Could not obtain a "
-                    "usable original article image."
-                )
-
-                print(
-                    f"✗ FAILED\n{error}"
-                )
-
-                save_error(
-                    news_id,
-                    error
-                )
-
+                error = "Could not obtain a usable original article image."
+                print(f"✗ FAILED\n{error}")
+                save_error(news_id, error)
                 continue
 
-            # ------------------------------------------------
-            # PHOTO CARD
-            # ------------------------------------------------
-
-            card = create_photo_card(
-                image,
-                title,
-                source,
-                published_at
-            )
+            card = create_photo_card(image, title, source, published_at)
 
             if card is None:
-
-                error = (
-                    "Could not create photo "
-                    "card from original article image."
-                )
-
-                print(
-                    f"✗ FAILED\n{error}"
-                )
-
-                save_error(
-                    news_id,
-                    error
-                )
-
+                error = "Could not create photo card from original article image."
+                print(f"✗ FAILED\n{error}")
+                save_error(news_id, error)
                 continue
 
-            # ------------------------------------------------
-            # FACEBOOK
-            # ------------------------------------------------
-
-            print(
-                "Posting photo card to Facebook..."
-            )
-
-            post_id, error = (
-                post_to_facebook(
-                    card,
-                    title,
-                    description,
-                    article_url
-                )
-            )
+            print("Posting photo card to Facebook...")
+            post_id, error = post_to_facebook(card, title, description, article_url)
 
             if post_id:
-
-                print(
-                    "✓ Facebook post successful"
-                )
-
-                print(
-                    f"Facebook Post ID: "
-                    f"{post_id}"
-                )
-
-                mark_posted(
-                    news_id,
-                    post_id
-                )
-
+                print("✓ Facebook post successful")
+                print(f"Facebook Post ID: {post_id}")
+                mark_posted(news_id, post_id)
                 posted_count += 1
-
-                print(
-                    "✓ COMPLETE"
-                )
-
+                print("✓ COMPLETE")
             else:
-
-                print(
-                    "✗ Facebook post failed"
-                )
-
-                print(
-                    f"Error: {error}"
-                )
-
-                save_error(
-                    news_id,
-                    error
-                )
+                print("✗ Facebook post failed")
+                print(f"Error: {error}")
+                save_error(news_id, error)
 
         except Exception as e:
+            print(f"✗ FAILED\n{e}")
+            save_error(news_id, e)
 
-            print(
-                f"✗ FAILED\n{e}"
-            )
-
-            save_error(
-                news_id,
-                e
-            )
-
-    # --------------------------------------------------------
-    # FINISHED
-    # --------------------------------------------------------
-
-    print(
-        "\n=========================================="
-    )
-
-    print(
-        f"Finished. Posted: "
-        f"{posted_count}"
-    )
-
-    print(
-        "=========================================="
-    )
+    print("\n==========================================")
+    print(f"Finished. Posted: {posted_count}")
+    print("==========================================")
 
 
 if __name__ == "__main__":
