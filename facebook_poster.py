@@ -67,21 +67,22 @@ CAPTION_MAX_CHARS = 4500
 CARD_WIDTH = 1080
 CARD_HEIGHT = 1350
 
-SIDE_MARGIN = 56
-TOP_MARGIN = 44
-BOTTOM_MARGIN = 52
+# Segmented layout: header | image | footer
+HEADER_HEIGHT = 280
+IMAGE_HEIGHT = 870
+FOOTER_HEIGHT = CARD_HEIGHT - HEADER_HEIGHT - IMAGE_HEIGHT  # 200px
 
-# Vertical bias used when cropping a photo to fill the frame.
-# 0.0 = keep the top of the photo, 1.0 = keep the bottom, 0.5 = dead
-# center. The photo always covers the ENTIRE card either way — this
-# only controls which part gets trimmed off when the source photo's
-# aspect ratio doesn't exactly match the card's. Centered by default
-# so the subject of the photo is never pushed toward one edge.
+SIDE_MARGIN = 56
+TOP_MARGIN = 36
+BOTTOM_MARGIN_HEADER = 32
+
+# Vertical bias when cropping the photo to fill its middle section.
+# 0.5 = dead center, so the photo fills evenly from top to bottom.
 CROP_VERTICAL_BIAS = 0.5
 
-HEADLINE_FONT_SIZE = 66
+HEADLINE_FONT_SIZE = 62
 HEADLINE_MIN_FONT_SIZE = 36
-HEADLINE_LINE_SPACING = 14
+HEADLINE_LINE_SPACING = 12
 HEADLINE_MAX_LINES = 4
 
 HIGHLIGHT_PAD_X = 12
@@ -89,24 +90,19 @@ HIGHLIGHT_PAD_TOP = 8
 HIGHLIGHT_PAD_BOTTOM = 12
 HIGHLIGHT_RADIUS = 10
 
-GAP_AFTER_HEADLINE = 22
+GAP_AFTER_HEADLINE = 18
 
-SOURCE_FONT_SIZE = 26
-CREDIT_FONT_SIZE = 18
-
-# How tall the top/bottom dark overlays are allowed to be, as a
-# fraction of the full card height, before we force the headline
-# font down further so the photo never gets fully swallowed.
-MAX_BOTTOM_OVERLAY_RATIO = 0.52
-TOP_OVERLAY_HEIGHT = 190
+SOURCE_FONT_SIZE = 24
+CREDIT_FONT_SIZE = 17
 
 # Accent colors
 ACCENT_RED = (196, 44, 44)
 HIGHLIGHT_GOLD = (255, 200, 20)
 INK_BLACK = (24, 24, 24)
 WHITE = (255, 255, 255)
-OFF_WHITE = (235, 235, 232)
-MUTED_LIGHT = (215, 213, 210)
+HEADER_BG = (248, 248, 246)
+FOOTER_BG = (32, 50, 60)
+MUTED_TEXT = (100, 100, 100)
 
 # Fraction of the headline (by word count) that gets the gold
 # highlight treatment, read left-to-right from the first word.
@@ -804,52 +800,60 @@ def fit_headline(measure_draw, title, max_text_width, max_block_height):
 
 def create_photo_card(image, title, source, published_at=None):
     """
-    Modern, full-bleed Facebook photo card:
-      - the article photo fills the ENTIRE 1080x1350 card, cropped
-        (never letterboxed/blurred) to cover the whole frame — this
-        is the part that was previously "sitting" inside a smaller
-        boxed-in area and is now the whole card
-      - a soft dark gradient at the top holds a red "LATEST NEWS"
-        pill + date, and the brand wordmark
-      - a taller dark gradient at the bottom holds the bold white
-        headline (with a gold highlighted lead-in phrase) and the
-        source/date meta line, sized to auto-fit any headline length
-      - renders crisp at 1080px width, Facebook/Instagram's own
-        recommended size, so it looks sharp on both mobile and
-        desktop feeds without any extra platform-side cropping
+    Modern segmented Facebook photo card with three sections:
+      - Header (white background): "LATEST NEWS" pill, headline with gold
+        highlight on lead-in words, source/date metadata, thin red accent
+        line at top
+      - Middle (centered image): the news photo, cover-cropped to fill
+        IMAGE_HEIGHT (870px) and centered so it's balanced top/bottom/sides
+      - Footer (dark background): brand wordmark + tagline, credit line
+    
+    The entire 1080x1350 card renders crisp on mobile and desktop without
+    platform-side cropping, and is highly optimized for social feeds.
     """
 
     try:
+        headline_bengali_font = get_font(HEADLINE_FONT_SIZE, bold=True, bengali=True)
+        headline_latin_font = get_font(HEADLINE_FONT_SIZE, bold=True, bengali=False)
         source_bengali_font = get_font(SOURCE_FONT_SIZE, bold=True, bengali=True)
         source_latin_font = get_font(SOURCE_FONT_SIZE, bold=True, bengali=False)
         credit_font = get_font(CREDIT_FONT_SIZE, bold=False, bengali=False)
-        brand_font = get_font(32, bold=True, bengali=False)
-        tagline_font = get_font(17, bold=False, bengali=False)
-        pill_font = get_font(20, bold=True, bengali=False)
-        date_font = get_font(20, bold=True, bengali=False)
+        brand_font = get_font(30, bold=True, bengali=False)
+        brand_tagline_font = get_font(16, bold=False, bengali=False)
+        pill_font = get_font(19, bold=True, bengali=False)
+        date_font = get_font(19, bold=True, bengali=False)
 
-        measure_img = Image.new("RGB", (CARD_WIDTH, 10), (0, 0, 0))
+        measure_img = Image.new("RGB", (CARD_WIDTH, 10), HEADER_BG)
         measure_draw = ImageDraw.Draw(measure_img)
 
         max_text_width = CARD_WIDTH - (2 * SIDE_MARGIN)
 
-        # ---------------- Headline (auto-fit to available space) ----------------
+        # ================== HEADER SECTION (white bg) ==================
+        # Reserve space for: pill + gap + headline + gap + source/date
 
-        max_bottom_overlay_height = CARD_HEIGHT * MAX_BOTTOM_OVERLAY_RATIO
-        # Reserve room for meta line + paddings before computing the
-        # budget left for the headline block itself.
-        source_line_probe_height = mixed_text_height(
+        # Estimate pill height
+        pill_bbox = measure_draw.textbbox((0, 0), "LATEST NEWS", font=pill_font)
+        pill_height = (pill_bbox[3] - pill_bbox[1]) + 16  # +16 for padding
+
+        # Estimate source line height
+        source_line_height = mixed_text_height(
             measure_draw, "Ag", source_bengali_font, source_latin_font
         )
-        reserved_for_chrome = (
-            BOTTOM_MARGIN + source_line_probe_height + GAP_AFTER_HEADLINE + 24
-        )
-        max_headline_block_height = max(
-            120, max_bottom_overlay_height - reserved_for_chrome
+
+        # Available vertical space for headline in header
+        available_for_headline = (
+            HEADER_HEIGHT 
+            - TOP_MARGIN 
+            - pill_height 
+            - 20  # gap after pill
+            - BOTTOM_MARGIN_HEADER 
+            - source_line_height 
+            - GAP_AFTER_HEADLINE
         )
 
+        # Fit headline to available space
         line_word_lists, line_heights, headline_bengali_font, headline_latin_font = fit_headline(
-            measure_draw, title, max_text_width, max_headline_block_height
+            measure_draw, title, max_text_width, available_for_headline
         )
 
         total_words = sum(len(w) for w in line_word_lists)
@@ -860,70 +864,41 @@ def create_photo_card(image, title, source, published_at=None):
             + HEADLINE_LINE_SPACING * max(0, len(line_word_lists) - 1)
         )
 
-        # ---------------- Metadata line ----------------
-
+        # Metadata
         source_text = (source or "").strip().upper()
         date_text = format_display_date(published_at)
         source_line = f"{source_text}  •  {date_text}" if source_text else date_text
 
-        source_line_height = mixed_text_height(
-            measure_draw, source_line, source_bengali_font, source_latin_font
-        )
+        # ================== BUILD CARD (header | image | footer) ==================
 
-        # ---------------- Full-bleed photo (fills the entire card) ----------------
-
-        photo = cover_crop_to_canvas(image, CARD_WIDTH, CARD_HEIGHT)
-        base = photo.convert("RGBA")
-
-        # ---------------- Bottom dark gradient (headline legibility) ----------------
-
-        bottom_content_height = (
-            headline_block_height + GAP_AFTER_HEADLINE + source_line_height
-        )
-        bottom_overlay_height = int(
-            min(
-                CARD_HEIGHT * 0.92,
-                bottom_content_height + BOTTOM_MARGIN + 130,
-            )
-        )
-        bottom_overlay_height = max(bottom_overlay_height, 260)
-
-        bottom_gradient = make_vertical_gradient(
-            CARD_WIDTH, bottom_overlay_height, top_alpha=0, bottom_alpha=205
-        )
-        base.alpha_composite(
-            bottom_gradient, (0, CARD_HEIGHT - bottom_overlay_height)
-        )
-
-        # ---------------- Top dark gradient (pill/brand legibility) ----------------
-
-        top_gradient = make_vertical_gradient(
-            CARD_WIDTH, TOP_OVERLAY_HEIGHT, top_alpha=165, bottom_alpha=0
-        )
-        base.alpha_composite(top_gradient, (0, 0))
+        # Start with a base card
+        base_rgb = Image.new("RGB", (CARD_WIDTH, CARD_HEIGHT), HEADER_BG)
+        base = base_rgb.convert("RGBA")
 
         draw = ImageDraw.Draw(base)
 
-        # thin accent line right at the top edge
+        # ---- Top accent red line ----
         draw.rectangle((0, 0, CARD_WIDTH, 6), fill=ACCENT_RED)
 
-        # ---------------- Top row: "LATEST NEWS" pill + date ----------------
+        # ---- Header section background (already white from Image.new) ----
+        # Now draw the header content
 
+        # ---- LATEST NEWS pill + date in header ----
         pill_w, pill_h = draw_pill(
             draw, (SIDE_MARGIN, TOP_MARGIN), "LATEST NEWS",
             font=pill_font, fg=WHITE, bg=ACCENT_RED,
         )
 
-        date_bbox = draw.textbbox((0, 0), date_text, font=date_font)
+        date_bbox = measure_draw.textbbox((0, 0), date_text, font=date_font)
         date_w = date_bbox[2] - date_bbox[0]
+        date_h = date_bbox[3] - date_bbox[1]
         draw.text(
-            (CARD_WIDTH - SIDE_MARGIN - date_w, TOP_MARGIN + (pill_h - (date_bbox[3] - date_bbox[1])) // 2 - date_bbox[1]),
-            date_text, font=date_font, fill=OFF_WHITE,
+            (CARD_WIDTH - SIDE_MARGIN - date_w, TOP_MARGIN + (pill_h - date_h) // 2),
+            date_text, font=date_font, fill=MUTED_TEXT,
         )
 
-        # ---------------- Headline block (bottom, over the photo) ----------------
-
-        y = CARD_HEIGHT - BOTTOM_MARGIN - source_line_height - GAP_AFTER_HEADLINE - headline_block_height
+        # ---- Headline in header section ----
+        y = TOP_MARGIN + pill_h + 20
         global_index = 0
 
         for words, height in zip(line_word_lists, line_heights):
@@ -931,53 +906,75 @@ def create_photo_card(image, title, source, published_at=None):
                 draw, words, global_index, highlight_count,
                 SIDE_MARGIN, y, height,
                 headline_bengali_font, headline_latin_font,
-                base_color=WHITE,
+                base_color=INK_BLACK,
             )
             global_index += len(words)
             y += height + HEADLINE_LINE_SPACING
 
-        # thin divider between headline and meta
-        divider_y = CARD_HEIGHT - BOTTOM_MARGIN - source_line_height - (GAP_AFTER_HEADLINE // 2)
-        draw.line(
-            (SIDE_MARGIN, divider_y, CARD_WIDTH - SIDE_MARGIN, divider_y),
-            fill=(255, 255, 255, 90), width=2,
-        )
-
-        # source/date meta line
-        metadata_y = CARD_HEIGHT - BOTTOM_MARGIN - source_line_height
+        # ---- Source/date line in header ----
+        source_y = HEADER_HEIGHT - BOTTOM_MARGIN_HEADER - source_line_height
         draw_mixed_text(
-            draw, (SIDE_MARGIN, metadata_y), source_line,
-            source_bengali_font, source_latin_font, MUTED_LIGHT,
+            draw, (SIDE_MARGIN, source_y), source_line,
+            source_bengali_font, source_latin_font, MUTED_TEXT,
         )
 
-        dot_x = CARD_WIDTH - SIDE_MARGIN - 8
-        dot_y = metadata_y + source_line_height // 2
-        draw.ellipse((dot_x - 5, dot_y - 5, dot_x + 5, dot_y + 5), fill=ACCENT_RED)
+        # ---- Image section: centered, cover-cropped ----
+        image_section_y = HEADER_HEIGHT
+        photo = cover_crop_to_canvas(image, CARD_WIDTH, IMAGE_HEIGHT)
+        base.paste(photo.convert("RGBA"), (0, image_section_y))
 
-        # ---------------- Brand wordmark (top-left, small & unobtrusive) ----------------
+        # ---- Footer section (dark background) ----
+        footer_y = HEADER_HEIGHT + IMAGE_HEIGHT
+        footer_section = Image.new("RGB", (CARD_WIDTH, FOOTER_HEIGHT), FOOTER_BG)
+        base.paste(footer_section, (0, footer_y))
 
+        # Draw on footer
+        draw = ImageDraw.Draw(base)
+
+        # Brand wordmark + tagline, centered-ish in footer
         brand_x = SIDE_MARGIN
-        brand_y = TOP_MARGIN + pill_h + 14
+        brand_y = footer_y + 20
 
+        brand_bbox = draw.textbbox((0, 0), BRAND_MARK or "TN", font=brand_font)
+        brand_w = brand_bbox[2] - brand_bbox[0]
+        brand_h = brand_bbox[3] - brand_bbox[1]
+
+        # Draw badge background for brand mark
+        badge_radius = 8
+        draw.rounded_rectangle(
+            (brand_x - 6, brand_y - 6, brand_x + brand_w + 12, brand_y + brand_h + 12),
+            radius=badge_radius,
+            fill=(255, 255, 255, 20),
+            outline=(255, 255, 255, 60),
+            width=1,
+        )
+
+        draw.text(
+            (brand_x + 3, brand_y),
+            BRAND_MARK or "TN", font=brand_font, fill=WHITE,
+        )
+
+        # Tagline below brand
         if BRAND_TAGLINE:
+            tag_y = brand_y + brand_h + 6
             draw.text(
-                (brand_x, brand_y), BRAND_TAGLINE,
-                font=tagline_font, fill=(255, 255, 255, 200),
+                (brand_x, tag_y), BRAND_TAGLINE,
+                font=brand_tagline_font, fill=(255, 255, 255, 220),
             )
 
-        # ---------------- "Image collected" credit, tiny, bottom-right ----------------
+        # Image credit, bottom-right of footer
+        credit_text = f"IMAGE: COLLECTED"
+        credit_bbox = draw.textbbox((0, 0), credit_text, font=credit_font)
+        credit_w = credit_bbox[2] - credit_bbox[0]
+        credit_h = credit_bbox[3] - credit_bbox[1]
+        credit_x = CARD_WIDTH - SIDE_MARGIN - credit_w
+        credit_y = footer_y + FOOTER_HEIGHT - 20 - credit_h
+        draw.text(
+            (credit_x, credit_y),
+            credit_text, font=credit_font, fill=(255, 255, 255, 180),
+        )
 
-        if source_text:
-            credit_text = f"IMAGE: COLLECTED"
-            credit_bbox = draw.textbbox((0, 0), credit_text, font=credit_font)
-            credit_w = credit_bbox[2] - credit_bbox[0]
-            draw.text(
-                (CARD_WIDTH - SIDE_MARGIN - credit_w, CARD_HEIGHT - 26),
-                credit_text, font=credit_font, fill=(255, 255, 255, 150),
-            )
-
-        # ---------------- Export ----------------
-
+        # ---- Export ----
         output = io.BytesIO()
         base.convert("RGB").save(output, format="JPEG", quality=95, optimize=True)
         output.seek(0)
@@ -986,11 +983,13 @@ def create_photo_card(image, title, source, published_at=None):
             print("✗ Generated photo card is empty.")
             return None
 
-        print(f"✓ Photo card created ({CARD_WIDTH}x{CARD_HEIGHT}, full-bleed)")
+        print(f"✓ Photo card created ({CARD_WIDTH}x{CARD_HEIGHT}, segmented: header|image|footer)")
         return output
 
     except Exception as e:
         print(f"✗ Photo card creation failed: {e}")
+        import traceback
+        traceback.print_exc()
         return None
 
 
