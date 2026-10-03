@@ -1260,7 +1260,12 @@ kbd {
     --flag-red: #E0263A;
     --text-start: clamp(20px, 3vw, 40px);
     display: grid;
+    /* One full-width column. The shared .band rule sets justify-content: space-between,
+       which on a grid stops the track from stretching, so override it explicitly. */
+    grid-template-columns: minmax(0, 1fr);
     grid-template-rows: repeat(3, minmax(min-content, 1fr));
+    justify-content: stretch;
+    justify-items: stretch;
     gap: 0;
     padding: 0;
     align-items: stretch;
