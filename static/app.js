@@ -1552,6 +1552,7 @@ function route() {
         $$(".nav-item[aria-current]").forEach((a) => a.setAttribute("aria-current", "page"));
         renderView(view, arg);
         scheduleStack();
+        dripsViewChanged();
         document.title = {
             foryou: "News — Your live feed",
             bangladesh: "Bangladesh — News",
@@ -1761,6 +1762,272 @@ function sizeFlag(el, force = false) {
 const flagObserver = "ResizeObserver" in window && new ResizeObserver((entries) => entries.forEach((e) => sizeFlag(e.target)));
 $$(".band-pal").forEach((band) => flagObserver?.observe(band));
 window.addEventListener("resize", debounce(() => $$(".band-pal").forEach((b) => sizeFlag(b)), 150));
+
+/* ---------------------------------------------------------
+   PALESTINE: CRIMSON DRIPS
+   Whole-tab effect: a deep crimson shade pours from under the header and thin
+   drips run down the screen. It starts the moment the Palestine tab opens and
+   repeats every 30 seconds while the tab stays open.
+   Reading stays comfortable:
+   - the overlay never intercepts clicks or scrolling
+   - wherever a drip crosses text (headlines, summaries, filters, the banner,
+     the ticker) it fades to a faint ghost; positions are re-measured as you scroll
+   - each moment lasts about 9 seconds and the loop only runs during a moment
+   - nothing plays while the tab is in the background, or when the device asks
+     for reduced motion
+--------------------------------------------------------- */
+const drips = {
+    canvas: $("#drip-canvas"),
+    ctx: null,
+    w: 0,
+    h: 0,
+    dpr: 1,
+    holes: [],
+    dirty: true,
+    measuredAt: 0,
+    timer: 0,
+    raf: 0,
+    ep: null,
+    moments: 0,
+    lastStart: 0,
+};
+
+const reduceMotionMQ = matchMedia("(prefers-reduced-motion: reduce)");
+const DRIP_MOMENT = 9;
+const DRIP_EVERY = 30000;
+
+const DRIP_TEXT = [
+    '.view[data-view="palestine"] :is(.headline, .dek, .kicker, .why, .eyebrow, .band-title, .band-sub, .stat, .chip, .section-h h2, .card-foot, .seg, .read)',
+    ".ticker",
+].join(",");
+
+function dripsAllowed() {
+    return state.view === "palestine" && !document.hidden && !reduceMotionMQ.matches;
+}
+
+function dripsFit() {
+    const r = drips.canvas.getBoundingClientRect();
+    if (!r.width || !r.height) return false;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    if (r.width === drips.w && r.height === drips.h && dpr === drips.dpr && drips.ctx) return true;
+    drips.w = r.width;
+    drips.h = r.height;
+    drips.dpr = dpr;
+    drips.canvas.width = Math.round(r.width * dpr);
+    drips.canvas.height = Math.round(r.height * dpr);
+    drips.ctx = drips.canvas.getContext("2d");
+    drips.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    drips.dirty = true;
+    return true;
+}
+
+// Where text sits right now, relative to the overlay; drips ghost out behind it.
+function dripsMeasureText(now) {
+    const box = drips.canvas.getBoundingClientRect();
+    const holes = [];
+    for (const el of document.querySelectorAll(DRIP_TEXT)) {
+        const r = el.getBoundingClientRect();
+        if (!r.width || r.bottom < box.top || r.top > box.bottom) continue;
+        holes.push({ x: r.left - box.left - 6, y: r.top - box.top - 4, w: r.width + 12, h: r.height + 8 });
+    }
+    drips.holes = holes;
+    drips.dirty = false;
+    drips.measuredAt = now;
+}
+
+function dripsClear() {
+    if (drips.ctx) drips.ctx.clearRect(0, 0, drips.w, drips.h);
+}
+
+// A moment finished: the 30s timer keeps running.
+function dripsEnd() {
+    cancelAnimationFrame(drips.raf);
+    drips.ep = null;
+    dripsClear();
+}
+
+// Full stop: leaving the tab, hiding the page. Cancels the repeat as well.
+function dripsStop() {
+    clearTimeout(drips.timer);
+    dripsEnd();
+}
+
+function dripsStart() {
+    clearTimeout(drips.timer);
+    cancelAnimationFrame(drips.raf);
+    if (!dripsAllowed() || !dripsFit()) return;
+
+    const count = Math.max(4, Math.min(9, Math.round(drips.w / 150)));
+    const list = [];
+    for (let i = 0; i < count; i++) {
+        list.push({
+            x: ((i + 0.2 + Math.random() * 0.6) / count) * drips.w,
+            delay: Math.random() * 2.6,
+            width: 1.8 + Math.random() * 2.2,
+            v0: 8 + Math.random() * 10,
+            accel: 130 + Math.random() * 120,
+        });
+    }
+
+    drips.moments++;
+    drips.lastStart = Date.now();
+    drips.ep = { t: 0, last: performance.now(), list };
+    drips.dirty = true;
+    drips.raf = requestAnimationFrame(dripsFrame);
+
+    // The next moment starts 30s after this one began.
+    drips.timer = setTimeout(dripsStart, DRIP_EVERY);
+}
+
+// Wobbling lower edge of the crimson shade.
+function dripsEdge(x, t, grow) {
+    return drips.h * (0.025 + 0.075 * grow) + Math.sin(x * 0.018 + t * 0.6) * 5 + Math.sin(x * 0.047 - t * 0.4) * 3;
+}
+
+function dripsFrame(now) {
+    const ep = drips.ep;
+    if (!ep) return;
+
+    if (!dripsAllowed()) {
+        dripsStop();
+        return;
+    }
+
+    dripsFit();
+    if (drips.dirty || now - drips.measuredAt > 250) dripsMeasureText(now);
+
+    const { ctx, w, h } = drips;
+    ep.t += Math.min(0.05, (now - ep.last) / 1000);
+    ep.last = now;
+    const t = ep.t;
+
+    if (t >= DRIP_MOMENT) {
+        dripsEnd();
+        return;
+    }
+
+    const env = Math.max(0, Math.min(1, t / 0.9, (DRIP_MOMENT - t) / 1.8));
+    const fade = env * env * (3 - 2 * env);
+    const grow = Math.min(1, t / 3);
+
+    ctx.clearRect(0, 0, w, h);
+    ctx.save();
+
+    // The drips.
+    for (const d of ep.list) {
+        const tt = t - d.delay;
+        if (tt <= 0) continue;
+
+        const top = dripsEdge(d.x, t, grow) - 2;
+        const raw = top + d.v0 * tt + 0.5 * d.accel * tt * tt;
+        if (raw > h + 24 && d.exit === undefined) d.exit = t;
+        const life = d.exit === undefined ? 1 : 1 - Math.min(1, (t - d.exit) / 1.6);
+        if (life <= 0) continue;
+
+        const head = Math.min(raw, h + 24);
+        const r = d.width * 1.25 * Math.min(1, tt / 0.9) + 0.4;
+        const mid = top + (head - top) * 0.5;
+        const wt = d.width * 1.4;
+        const wb = d.width * 0.55;
+        ctx.globalAlpha = fade * 0.88 * life;
+
+        const trail = ctx.createLinearGradient(0, top, 0, head);
+        trail.addColorStop(0, "rgba(104, 8, 22, .96)");
+        trail.addColorStop(1, "rgba(192, 24, 44, .96)");
+        ctx.fillStyle = trail;
+        ctx.beginPath();
+        ctx.moveTo(d.x - wt, top);
+        ctx.quadraticCurveTo(d.x - wb, mid, d.x - wb, head);
+        ctx.lineTo(d.x + wb, head);
+        ctx.quadraticCurveTo(d.x + wb, mid, d.x + wt, top);
+        ctx.closePath();
+        ctx.fill();
+
+        if (head < h + 20) {
+            const bead = ctx.createRadialGradient(d.x - r * 0.3, head - r * 0.4, r * 0.1, d.x, head, r * 1.15);
+            bead.addColorStop(0, "rgba(255, 150, 158, .95)");
+            bead.addColorStop(0.35, "rgba(214, 31, 44, .98)");
+            bead.addColorStop(1, "rgba(104, 8, 22, .98)");
+            ctx.fillStyle = bead;
+            ctx.beginPath();
+            ctx.ellipse(d.x, head, r, r * 1.35, 0, 0, Math.PI * 2);
+            ctx.fill();
+        }
+    }
+
+    ctx.globalAlpha = fade * 0.8;
+
+    // The shade, drawn last so it sits cleanly over the drips' roots.
+    const shade = ctx.createLinearGradient(0, 0, 0, h * 0.1);
+    shade.addColorStop(0, "rgba(84, 5, 16, .9)");
+    shade.addColorStop(1, "rgba(176, 18, 40, .68)");
+    ctx.fillStyle = shade;
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    for (let x = 0; x <= w + 6; x += 6) ctx.lineTo(x, dripsEdge(x, t, grow));
+    ctx.lineTo(w, 0);
+    ctx.closePath();
+    ctx.fill();
+
+    // A faint wet highlight along the edge.
+    ctx.strokeStyle = "rgba(255, 130, 140, .22)";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    for (let x = 0; x <= w + 6; x += 6) {
+        const y = dripsEdge(x, t, grow) - 1;
+        x === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+
+    // Everything (shade and drips alike) fades to a faint ghost behind text, so nothing dims what you read.
+    ctx.globalCompositeOperation = "destination-out";
+    ctx.globalAlpha = 0.88;
+    ctx.fillStyle = "#000";
+    for (const r of drips.holes) {
+        ctx.beginPath();
+        if (ctx.roundRect) ctx.roundRect(r.x, r.y, r.w, r.h, 10);
+        else ctx.rect(r.x, r.y, r.w, r.h);
+        ctx.fill();
+    }
+
+    ctx.restore();
+    drips.raf = requestAnimationFrame(dripsFrame);
+}
+
+// Called from the router: opening the Palestine tab shows the drips straight away.
+function dripsViewChanged() {
+    if (state.view === "palestine") dripsStart();
+    else dripsStop();
+}
+
+window.addEventListener("scroll", () => { drips.dirty = true; }, { passive: true });
+window.addEventListener("resize", () => { drips.dirty = true; });
+
+// Content appearing or reflowing (ticker, new cards, images) moves text, so measure again.
+if ("ResizeObserver" in window) {
+    const reflow = new ResizeObserver(() => { drips.dirty = true; });
+    reflow.observe($(".main-col"));
+    reflow.observe($("#ticker"));
+}
+
+// Coming back from another window keeps the 30s rhythm instead of replaying at once.
+function dripsResume() {
+    clearTimeout(drips.timer);
+    if (!dripsAllowed()) return;
+    const wait = DRIP_EVERY - (Date.now() - drips.lastStart);
+    if (wait <= 0) dripsStart();
+    else drips.timer = setTimeout(dripsStart, wait);
+}
+
+document.addEventListener("visibilitychange", () => {
+    if (document.hidden) dripsStop();
+    else dripsResume();
+});
+
+reduceMotionMQ.addEventListener?.("change", () => {
+    if (reduceMotionMQ.matches) dripsStop();
+    else dripsResume();
+});
 
 /* ---------------------------------------------------------
    BACK TO TOP

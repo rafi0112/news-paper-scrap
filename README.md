@@ -911,6 +911,7 @@ palestine.py          live Palestine news + video aggregator
 - **Library:** saved stories and reading history. Saved items survive the 24-hour database cleanup because they are stored on the device.
 - **Live updates:** a "New stories" pill appears when fresh news arrives, without reshuffling what the reader is looking at.
 - **App-like:** installable on phones (PWA), with a bottom tab bar on mobile and three columns on desktop.
+- **Palestine tab:** a short crimson-drips animation plays across the whole tab the moment it opens, then every 30 seconds while it stays open. It never intercepts clicks, fades to a faint ghost wherever it crosses text so reading stays clear, and does not play for visitors whose device is set to "reduce motion".
 
 **24-hour window:** the Supabase job deletes news older than one day, so every part of the site (`/api/today`, `/api/palestine`, trending topics, the feed) works on the last 24 hours. If a quiet day leaves fewer than 12 videos in that window, Shorts tops up from the last 72 hours so it is never empty.
 

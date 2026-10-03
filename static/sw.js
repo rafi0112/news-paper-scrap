@@ -4,7 +4,7 @@
  * immediately; the cache is only a fallback when the visitor is offline.
  */
 
-const CACHE = "bn-v8";
+const CACHE = "bn-v10";
 const SHELL = ["/", "/static/app.css", "/static/app.js", "/static/icon-192.png", "/static/flag-palestine.webp", "/static/flag-bangladesh.webp"];
 
 self.addEventListener("install", (event) => {

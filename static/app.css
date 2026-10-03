@@ -4028,3 +4028,32 @@ dialog {
 .band-pal {
     align-content: stretch;
 }
+
+/* ---------- Palestine tab: crimson drips ----------
+   A fixed, click-through overlay between the header and the bottom bar. It sits
+   above the page content but below the header, tab bar, dialogs and toasts. */
+.drip-canvas {
+    position: fixed;
+    left: 0;
+    top: var(--header-h);
+    z-index: 30;
+    width: 100%;
+    height: calc(100dvh - var(--header-h) - var(--bottom-h));
+    pointer-events: none;
+}
+
+body:not([data-view="palestine"]) .drip-canvas {
+    display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .drip-canvas {
+        display: none;
+    }
+}
+
+/* The eyebrow line wraps as plain text (a flex row would space the two halves apart). */
+.band-pal .eyebrow {
+    display: block;
+    line-height: 1.5;
+}
