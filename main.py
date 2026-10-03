@@ -1,10 +1,15 @@
 import os
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, Query, Response
 from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from supabase import create_client, Client
+
+from palestine import get_palestine_feed
 
 
 # --------------------------------------------------
@@ -57,9 +62,46 @@ app.add_middleware(
 # Frontend
 # --------------------------------------------------
 
+BASE_DIR = Path(__file__).resolve().parent
+STATIC_DIR = BASE_DIR / "static"
+
+class RevalidatingStaticFiles(StaticFiles):
+    """Browsers re-check assets on each load (cheap 304s), so a new deploy is never mixed with stale JS/CSS."""
+
+    def file_response(self, *args, **kwargs):
+        response = super().file_response(*args, **kwargs)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
+app.mount("/static", RevalidatingStaticFiles(directory=STATIC_DIR), name="static")
+
+
 @app.get("/")
 def home():
-    return FileResponse("index.html")
+    return FileResponse(
+        BASE_DIR / "index.html",
+        headers={"Cache-Control": "no-cache"}
+    )
+
+
+# Service worker and manifest must live at the site root for full scope.
+
+@app.get("/sw.js")
+def service_worker():
+    return FileResponse(
+        STATIC_DIR / "sw.js",
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-cache"}
+    )
+
+
+@app.get("/manifest.webmanifest")
+def manifest():
+    return FileResponse(
+        STATIC_DIR / "manifest.webmanifest",
+        media_type="application/manifest+json"
+    )
 
 
 # --------------------------------------------------
@@ -273,4 +315,87 @@ def get_latest():
 
         return {
             "news": None
+        }
+
+
+# --------------------------------------------------
+# Everything from the last 24 hours (feeds the For You ranking)
+# --------------------------------------------------
+# The Supabase cleanup job deletes rows older than one day,
+# so this is the full live set in a single request.
+
+@app.get("/api/today")
+def get_today(response: Response):
+
+    try:
+
+        since = (
+            datetime.now(timezone.utc)
+            - timedelta(hours=24)
+        ).isoformat()
+
+        result = (
+            supabase
+            .table("news")
+            .select(
+                "id,source,title,description,image,url,published_at"
+            )
+            .gte("published_at", since)
+            .order(
+                "published_at",
+                desc=True,
+                nullsfirst=False
+            )
+            .limit(400)
+            .execute()
+        )
+
+        response.headers["Cache-Control"] = (
+            "public, s-maxage=60, stale-while-revalidate=300"
+        )
+
+        return {
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "news": result.data or []
+        }
+
+    except Exception as e:
+
+        print("Today API error:", e)
+
+        return {
+            "updated_at": None,
+            "news": [],
+            "error": "Unable to fetch news"
+        }
+
+
+# --------------------------------------------------
+# Palestine coverage (live RSS / YouTube aggregate)
+# --------------------------------------------------
+
+@app.get("/api/palestine")
+def get_palestine(response: Response):
+
+    try:
+
+        data = get_palestine_feed()
+
+        # Let the CDN serve cached copies so feeds are fetched rarely.
+        response.headers["Cache-Control"] = (
+            "public, s-maxage=600, stale-while-revalidate=1800"
+        )
+
+        return data
+
+    except Exception as e:
+
+        print("Palestine API error:", e)
+
+        return {
+            "updated_at": None,
+            "sources": [],
+            "articles": [],
+            "videos": [],
+            "error": "Unable to fetch Palestine coverage"
         }

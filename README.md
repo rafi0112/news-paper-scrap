@@ -881,6 +881,58 @@ GitHub Actions
 
 ---
 
+### Website (Vercel)
+
+The website is served by the same FastAPI app (`main.py`) that Vercel deploys on every push. There is no build step.
+
+```text
+index.html            page shell
+static/app.css        design system (light + dark)
+static/app.js         app logic: feed ranking, Shorts, Stories, search
+static/sw.js          service worker (installable app, offline fallback)
+static/manifest.webmanifest, static/icon-*.png
+palestine.py          live Palestine news + video aggregator
+```
+
+| Route | Purpose |
+|---|---|
+| `/` | Website |
+| `/api/today` | All Bangladesh news from the last 24 hours (feeds the For You ranking) |
+| `/api/palestine` | Palestine news + videos from the last 24 hours |
+| `/api/news`, `/api/sources`, `/api/latest` | Unchanged originals |
+
+**Sections:** For You · Bangladesh · Palestine · Shorts · Library
+
+- **For You:** a personalised feed. The ranking runs entirely in the browser and uses what the reader opens, watches, saves, shares or hides, combined with freshness, trending topics, novelty and source variety. "Because you read …" labels explain why each story appears. Nothing is sent to any server.
+- **Stories:** an Instagram-style bar with one bubble per outlet, plus a full-screen viewer with auto-advance.
+- **Shorts:** a vertical swipe video feed with autoplay and auto-advance (YouTube IFrame API, `youtube-nocookie.com`).
+- **Watch:** a video player with an "Up next" queue and an autoplay countdown.
+- **Search:** `Ctrl K` or `/` searches every story and video.
+- **Library:** saved stories and reading history. Saved items survive the 24-hour database cleanup because they are stored on the device.
+- **Live updates:** a "New stories" pill appears when fresh news arrives, without reshuffling what the reader is looking at.
+- **App-like:** installable on phones (PWA), with a bottom tab bar on mobile and three columns on desktop.
+
+**24-hour window:** the Supabase job deletes news older than one day, so every part of the site (`/api/today`, `/api/palestine`, trending topics, the feed) works on the last 24 hours. If a quiet day leaves fewer than 12 videos in that window, Shorts tops up from the last 72 hours so it is never empty.
+
+### Palestine desk (`/api/palestine`)
+
+`palestine.py` pulls free public RSS and YouTube channel feeds. No API keys are needed.
+
+| Type | Outlets |
+|---|---|
+| Palestine-focused news (all items kept) | Electronic Intifada, Mondoweiss, +972 Magazine, Palestinian Information Center, The Guardian (Palestinian territories) |
+| International news (keyword-filtered) | Al Jazeera, Middle East Eye, Middle East Monitor, UN News, BBC News, Anadolu Agency, Democracy Now! |
+| Bangla news (keyword-filtered) | Prothom Alo, BBC Bangla, DW Bangla |
+| YouTube (keyword-filtered unless noted) | Al Jazeera English, Middle East Eye, AJ+, TRT World, Democracy Now!, Drop Site News, Channel 4 News, Electronic Intifada (all kept), +972 Magazine |
+| Bangla YouTube (keyword-filtered) | Jamuna TV, Channel 24, DBC News |
+
+- This feed is served live and is **not** stored in Supabase. `facebook_poster.py` posts every row of the `news` table, so storing these items there would auto-post them to Facebook.
+- Results are cached in memory for 10 minutes, and the CDN caches the response (`s-maxage=600`).
+- To list every collected link, run `python palestine.py`.
+- To add an outlet, append an entry to `FEEDS` in `palestine.py`.
+
+---
+
 ## 35. Complete System Summary
 
 ```text

@@ -1,1294 +1,359 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="light">
+<html lang="en">
 
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Bengali News — Latest Stories</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>News — Your live feed</title>
+    <meta name="description" content="A personalised live feed of Bangladesh headlines, Palestine coverage and short news videos. Everything from the last 24 hours.">
+    <meta name="theme-color" content="#0F110E">
+    <meta property="og:title" content="News — Bangladesh & Palestine, live">
+    <meta property="og:description" content="Personalised headlines, stories and short videos from the last 24 hours.">
+    <meta property="og:image" content="/static/icon-512.png">
+    <link rel="manifest" href="/manifest.webmanifest">
+    <link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png">
+    <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="preconnect" href="https://i.ytimg.com">
     <link
-        href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,500;0,9..144,600;0,9..144,700;0,9..144,900;1,9..144,500;1,9..144,600&family=Inter:wght@400;500;600;700&display=swap"
+        href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;0,6..72,700;1,6..72,500&family=Inter+Tight:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600&family=Hind+Siliguri:wght@400;500;600;700&display=swap"
         rel="stylesheet">
-
-    <style>
-        :root {
-            --serif: 'Fraunces', Georgia, serif;
-            --sans: 'Inter', Helvetica, Arial, sans-serif;
-        }
-
-        /* ============ THEME TOKENS ============ */
-        html[data-theme="light"] {
-            --bg: #F1ECE1;
-            --bg-elevated: #FDFBF7;
-            --text: #1C1815;
-            --text-muted: #726A5C;
-            --accent: #8B2318;
-            --accent-hover: #6E1B13;
-            --border: #DCD3C1;
-            --rule: #1C1815;
-            --shadow: rgba(28, 24, 21, 0.06);
-            --shadow-rest: rgba(28, 24, 21, 0.07);
-            --shadow-hover: rgba(28, 24, 21, 0.16);
-            --accent-glow: rgba(139, 35, 24, 0.16);
-            --accent-glow-soft: rgba(139, 35, 24, 0.08);
-            --img-filter: grayscale(35%);
-            --img-filter-hover: grayscale(0%);
-        }
-
-        html[data-theme="dark"] {
-            --bg: #15130F;
-            --bg-elevated: #1E1B16;
-            --text: #EDE6D8;
-            --text-muted: #A89E8C;
-            --accent: #E27060;
-            --accent-hover: #F08B7C;
-            --border: #37312A;
-            --rule: #EDE6D8;
-            --shadow: rgba(0, 0, 0, 0.35);
-            --shadow-rest: rgba(0, 0, 0, 0.25);
-            --shadow-hover: rgba(0, 0, 0, 0.55);
-            --accent-glow: rgba(226, 112, 96, 0.22);
-            --accent-glow-soft: rgba(226, 112, 96, 0.1);
-            --img-filter: grayscale(55%) brightness(0.85);
-            --img-filter-hover: grayscale(0%) brightness(1);
-        }
-
-        * {
-            box-sizing: border-box;
-        }
-
-        body {
-            margin: 0;
-            font-family: var(--sans);
-            background: var(--bg);
-            color: var(--text);
-            transition: background .25s ease, color .25s ease;
-        }
-
-        ::selection {
-            background: var(--accent);
-            color: #fff;
-        }
-
-        @media (prefers-reduced-motion: reduce) {
-            .card {
-                animation: none !important;
-                transition: box-shadow .3s ease, border-color .3s ease !important;
-            }
-
-            .card-image {
-                transition: filter .3s ease !important;
-                transform: none !important;
-            }
-        }
-
-        /* ============ MASTHEAD ============ */
-        header {
-            background: var(--bg);
-            border-bottom: 3px double var(--rule);
-        }
-
-        .masthead-top {
-            max-width: 1180px;
-            margin: auto;
-            padding: 14px 24px 0;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            font-family: var(--sans);
-            font-size: 11.5px;
-            letter-spacing: .08em;
-            text-transform: uppercase;
-            color: var(--text-muted);
-        }
-
-        .masthead-top .edition {
-            font-weight: 600;
-        }
-
-        .theme-toggle {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            background: none;
-            border: 1px solid var(--border);
-            border-radius: 20px;
-            padding: 5px 12px;
-            color: var(--text);
-            font-family: var(--sans);
-            font-size: 11.5px;
-            letter-spacing: .06em;
-            text-transform: uppercase;
-            cursor: pointer;
-            transition: border-color .2s, background .2s;
-        }
-
-        .theme-toggle:hover {
-            border-color: var(--accent);
-            color: var(--accent);
-        }
-
-        .masthead-main {
-            max-width: 1180px;
-            margin: auto;
-            padding: 6px 24px 22px;
-            text-align: center;
-        }
-
-        .masthead-main .logo {
-            font-family: var(--serif);
-            font-weight: 900;
-            font-size: clamp(44px, 7vw, 72px);
-            letter-spacing: -0.01em;
-            line-height: 1;
-            margin: 0;
-        }
-
-        .masthead-main .logo em {
-            font-style: italic;
-            font-weight: 500;
-            color: var(--accent);
-        }
-
-        .masthead-main .tagline {
-            margin-top: 8px;
-            font-family: var(--serif);
-            font-style: italic;
-            font-size: 15px;
-            color: var(--text-muted);
-        }
-
-        /* ============ NEW NEWS BANNER ============ */
-        #new-news {
-            display: none;
-            max-width: 1180px;
-            margin: 0 auto;
-            padding: 11px 24px;
-            background: var(--accent);
-            color: #FDFBF7;
-            cursor: pointer;
-            text-align: center;
-            font-family: var(--sans);
-            font-size: 13.5px;
-            font-weight: 600;
-            letter-spacing: .04em;
-            transition: background .2s;
-        }
-
-        #new-news:hover {
-            background: var(--accent-hover);
-        }
-
-        #new-news .star {
-            margin-right: 6px;
-        }
-
-        /* ============ CONTROLS ============ */
-        .controls {
-            max-width: 1180px;
-            margin: auto;
-            padding: 26px 24px 0;
-            display: flex;
-            gap: 14px;
-            flex-wrap: wrap;
-            align-items: center;
-            border-top: 1px solid var(--border);
-            padding-top: 20px;
-        }
-
-        .search-wrap {
-            flex: 1;
-            min-width: 260px;
-            position: relative;
-        }
-
-        .search {
-            width: 100%;
-            padding: 10px 4px;
-            border: none;
-            border-bottom: 1px solid var(--border);
-            background: transparent;
-            color: var(--text);
-            font-family: var(--sans);
-            font-size: 15px;
-            outline: none;
-            transition: border-color .2s;
-        }
-
-        .search::placeholder {
-            color: var(--text-muted);
-        }
-
-        .search:focus {
-            border-color: var(--accent);
-        }
-
-        select {
-            padding: 10px 30px 10px 4px;
-            border: none;
-            border-bottom: 1px solid var(--border);
-            background: transparent;
-            color: var(--text);
-            font-family: var(--sans);
-            font-size: 14.5px;
-            outline: none;
-            cursor: pointer;
-            appearance: none;
-            -webkit-appearance: none;
-            background-image: linear-gradient(45deg, transparent 50%, var(--text-muted) 50%), linear-gradient(135deg, var(--text-muted) 50%, transparent 50%);
-            background-position: calc(100% - 14px) 55%, calc(100% - 8px) 55%;
-            background-size: 6px 6px, 6px 6px;
-            background-repeat: no-repeat;
-        }
-
-        select:focus {
-            border-color: var(--accent);
-        }
-
-        /* ============ MAIN ============ */
-        main {
-            max-width: 1180px;
-            margin: auto;
-            padding: 24px 24px 20px;
-        }
-
-        .section-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: baseline;
-            border-bottom: 2px solid var(--rule);
-            margin-bottom: 26px;
-            padding-bottom: 10px;
-        }
-
-        .section-title {
-            margin: 0;
-            font-family: var(--serif);
-            font-weight: 700;
-            font-size: 26px;
-            letter-spacing: -0.01em;
-        }
-
-        .result-count {
-            color: var(--text-muted);
-            font-size: 13px;
-            font-variant-numeric: tabular-nums;
-        }
-
-        /* ============ NEWS GRID ============ */
-        .news-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-            gap: 30px 26px;
-        }
-
-        /* ============ CARD ============ */
-        .card {
-            position: relative;
-            background: var(--bg-elevated);
-            border: 1px solid var(--border);
-            border-radius: 5px;
-            display: flex;
-            flex-direction: column;
-            overflow: hidden;
-            isolation: isolate;
-            animation: cardAppear .5s cubic-bezier(.16, 1, .3, 1) backwards;
-            animation-delay: calc(var(--i, 0) * 45ms);
-            box-shadow: 0 1px 2px var(--shadow-rest);
-            transform: perspective(1000px) rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg)) translateZ(0) scale(var(--s, 1));
-            transition: transform .5s cubic-bezier(.16, 1, .3, 1), box-shadow .45s ease, border-color .35s ease;
-        }
-
-        .card.is-hovering {
-            border-color: var(--accent);
-            box-shadow: 0 26px 44px -18px var(--shadow-hover), 0 0 0 1px var(--accent-glow-soft);
-            --s: 1.012;
-        }
-
-        /* cursor-tracked sheen, sits above media, below text via z-index layering */
-        .card::after {
-            content: "";
-            position: absolute;
-            inset: 0;
-            z-index: 5;
-            background: radial-gradient(480px circle at var(--mx, 50%) var(--my, 50%), var(--accent-glow), transparent 55%);
-            opacity: 0;
-            transition: opacity .4s ease;
-            pointer-events: none;
-            mix-blend-mode: var(--sheen-blend, normal);
-        }
-
-        html[data-theme="dark"] .card::after {
-            --sheen-blend: screen;
-        }
-
-        .card.is-hovering::after {
-            opacity: 1;
-        }
-
-        /* accent rule that draws in from the left on hover */
-        .card::before {
-            content: "";
-            position: absolute;
-            top: 0;
-            left: 0;
-            height: 3px;
-            width: 0%;
-            background: var(--accent);
-            z-index: 6;
-            transition: width .5s cubic-bezier(.16, 1, .3, 1);
-        }
-
-        .card.is-hovering::before {
-            width: 100%;
-        }
-
-        @keyframes cardAppear {
-            from {
-                opacity: 0;
-                transform: translateY(14px) scale(.98);
-            }
-
-            to {
-                opacity: 1;
-                transform: translateY(0) scale(1);
-            }
-        }
-
-        .card-media {
-            position: relative;
-            display: block;
-            height: 200px;
-            overflow: hidden;
-            background: var(--border);
-        }
-
-        .card-image,
-        .image-placeholder {
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
-            display: block;
-            background: var(--border);
-            filter: var(--img-filter);
-            transform: scale(1);
-            transition: filter .5s ease, transform .6s cubic-bezier(.16, 1, .3, 1);
-        }
-
-        .card.is-hovering .card-image {
-            filter: var(--img-filter-hover);
-            transform: scale(1.09);
-        }
-
-        .image-placeholder {
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            color: var(--text-muted);
-            font-size: 34px;
-            font-family: var(--serif);
-        }
-
-        /* gradient scrim + arrow reveal on the media */
-        .media-scrim {
-            position: absolute;
-            inset: 0;
-            background: linear-gradient(to top, rgba(0, 0, 0, .62) 0%, rgba(0, 0, 0, 0) 55%);
-            opacity: 0;
-            transition: opacity .4s ease;
-        }
-
-        .card.is-hovering .media-scrim {
-            opacity: 1;
-        }
-
-        .media-arrow {
-            position: absolute;
-            right: 14px;
-            bottom: 14px;
-            width: 34px;
-            height: 34px;
-            border-radius: 50%;
-            background: var(--accent);
-            color: #fff;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 15px;
-            opacity: 0;
-            transform: translateY(8px) scale(.85);
-            transition: opacity .35s ease, transform .35s cubic-bezier(.16, 1, .3, 1);
-        }
-
-        .card.is-hovering .media-arrow {
-            opacity: 1;
-            transform: translateY(0) scale(1);
-        }
-
-        .card-content {
-            position: relative;
-            z-index: 4;
-            padding: 20px;
-            display: flex;
-            flex-direction: column;
-            flex: 1;
-        }
-
-        .source {
-            display: flex;
-            align-items: center;
-            gap: 7px;
-            font-family: var(--sans);
-            font-size: 12.5px;
-            font-weight: 700;
-            color: var(--accent);
-            font-variant: small-caps;
-            letter-spacing: .03em;
-            margin-bottom: 10px;
-        }
-
-        .source::before {
-            content: "";
-            width: 6px;
-            height: 6px;
-            border-radius: 50%;
-            background: var(--accent);
-            transform: scale(.8);
-            transition: transform .3s cubic-bezier(.16, 1, .3, 1);
-        }
-
-        .card.is-hovering .source::before {
-            transform: scale(1.3);
-        }
-
-        .title {
-            font-family: var(--serif);
-            font-size: 20px;
-            font-weight: 600;
-            line-height: 1.32;
-            margin-bottom: 10px;
-            background-image: linear-gradient(var(--text), var(--text));
-            background-size: 0% 1px;
-            background-repeat: no-repeat;
-            background-position: 0 100%;
-            transition: background-size .5s cubic-bezier(.16, 1, .3, 1);
-        }
-
-        .card.is-hovering .title {
-            background-size: 100% 1px;
-        }
-
-        .description {
-            color: var(--text-muted);
-            font-size: 14px;
-            line-height: 1.55;
-            display: -webkit-box;
-            -webkit-line-clamp: 3;
-            -webkit-box-orient: vertical;
-            overflow: hidden;
-        }
-
-        .meta {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            gap: 10px;
-            margin-top: 16px;
-            padding-top: 14px;
-            border-top: 1px solid var(--border);
-            font-size: 12px;
-            color: var(--text-muted);
-        }
-
-        .read {
-            position: relative;
-            display: inline-flex;
-            align-items: center;
-            gap: 5px;
-            color: var(--accent);
-            text-decoration: none;
-            font-weight: 600;
-            white-space: nowrap;
-            font-family: var(--sans);
-            font-size: 13px;
-            letter-spacing: .01em;
-        }
-
-        .read::after {
-            content: "";
-            position: absolute;
-            left: 0;
-            bottom: -2px;
-            width: 100%;
-            height: 1px;
-            background: currentColor;
-            transform: scaleX(0);
-            transform-origin: right;
-            transition: transform .35s cubic-bezier(.16, 1, .3, 1);
-        }
-
-        .read:hover {
-            color: var(--accent-hover);
-        }
-
-        .read:hover::after {
-            transform: scaleX(1);
-            transform-origin: left;
-        }
-
-        .read .arrow {
-            display: inline-block;
-            transition: transform .35s cubic-bezier(.16, 1, .3, 1);
-        }
-
-        .read:hover .arrow {
-            transform: translateX(3px);
-        }
-
-        /* ============ PAGINATION ============ */
-        .pagination {
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            gap: 4px;
-            margin: 44px 0 20px;
-            flex-wrap: wrap;
-            font-family: var(--sans);
-        }
-
-        .pagination button {
-            border: none;
-            background: none;
-            padding: 8px 12px;
-            color: var(--text);
-            cursor: pointer;
-            font-size: 14px;
-            font-family: var(--sans);
-            border-bottom: 2px solid transparent;
-            transition: border-color .2s, color .2s;
-        }
-
-        .pagination button:hover:not(:disabled) {
-            border-color: var(--text-muted);
-        }
-
-        .pagination button.active {
-            color: var(--accent);
-            border-color: var(--accent);
-            font-weight: 700;
-        }
-
-        .pagination button:disabled {
-            opacity: .35;
-            cursor: not-allowed;
-        }
-
-        /* ============ LOADING ============ */
-        .loading {
-            grid-column: 1 / -1;
-            text-align: center;
-            padding: 80px 20px;
-            color: var(--text-muted);
-            font-size: 15px;
-            font-family: var(--sans);
-            border: 1px solid var(--border);
-            border-radius: 5px;
-        }
-
-        .spinner {
-            width: 30px;
-            height: 30px;
-            border: 2px solid var(--border);
-            border-top-color: var(--accent);
-            border-radius: 50%;
-            animation: spin .8s linear infinite;
-            margin: 0 auto 16px;
-        }
-
-        @keyframes spin {
-            to {
-                transform: rotate(360deg);
-            }
-        }
-
-        /* ============ EMPTY ============ */
-        .empty {
-            grid-column: 1 / -1;
-            text-align: center;
-            padding: 80px 20px;
-            color: var(--text-muted);
-            font-family: var(--sans);
-            border: 1px solid var(--border);
-            border-radius: 5px;
-        }
-
-        .empty-icon {
-            font-size: 38px;
-            margin-bottom: 12px;
-            font-family: var(--serif);
-        }
-
-
-        /* ============ FACEBOOK PAGE CTA ============ */
-        .facebook-page-bar {
-            max-width: 1180px;
-            margin: 0 auto;
-            padding: 0 24px 22px;
-        }
-
-        .facebook-page-card {
-            position: relative;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 20px;
-            padding: 15px 18px;
-            border: 1px solid var(--border);
-            border-radius: 12px;
-            background:
-                linear-gradient(135deg,
-                    rgba(25, 135, 84, 0.09),
-                    rgba(139, 35, 24, 0.06));
-            box-shadow: 0 8px 24px var(--shadow);
-            overflow: hidden;
-        }
-
-        .facebook-page-card::before {
-            content: "";
-            position: absolute;
-            left: 0;
-            top: 0;
-            bottom: 0;
-            width: 4px;
-            background: linear-gradient(to bottom,
-                    #198754 0%,
-                    #198754 48%,
-                    #D7263D 52%,
-                    #D7263D 100%);
-        }
-
-        .facebook-page-info {
-            display: flex;
-            align-items: center;
-            gap: 13px;
-            min-width: 0;
-        }
-
-        .facebook-icon {
-            width: 42px;
-            height: 42px;
-            flex: 0 0 42px;
-            display: grid;
-            place-items: center;
-            border-radius: 50%;
-            background: linear-gradient(145deg, #1877F2, #0d5bd7);
-            color: #fff;
-            box-shadow: 0 6px 16px rgba(24, 119, 242, .22);
-        }
-
-        .facebook-icon svg {
-            width: 22px;
-            height: 22px;
-            fill: currentColor;
-        }
-
-        .facebook-copy {
-            min-width: 0;
-        }
-
-        .facebook-kicker {
-            margin: 0 0 3px;
-            font-size: 10.5px;
-            font-weight: 800;
-            letter-spacing: .12em;
-            text-transform: uppercase;
-            color: var(--text-muted);
-        }
-
-        .facebook-title {
-            margin: 0;
-            font-family: var(--serif);
-            font-size: 18px;
-            font-weight: 700;
-            line-height: 1.15;
-        }
-
-        .facebook-subtitle {
-            margin: 4px 0 0;
-            color: var(--text-muted);
-            font-size: 12px;
-            line-height: 1.35;
-        }
-
-        .facebook-follow {
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            gap: 8px;
-            flex: 0 0 auto;
-            padding: 10px 16px;
-            border-radius: 999px;
-            color: #fff;
-            background: linear-gradient(135deg, #1877F2, #0d5bd7);
-            text-decoration: none;
-            font-family: var(--sans);
-            font-size: 13px;
-            font-weight: 800;
-            letter-spacing: .01em;
-            box-shadow: 0 7px 18px rgba(24, 119, 242, .20);
-            transition:
-                transform .25s ease,
-                box-shadow .25s ease,
-                filter .25s ease;
-        }
-
-        .facebook-follow:hover {
-            color: #fff;
-            transform: translateY(-2px);
-            box-shadow: 0 12px 24px rgba(24, 119, 242, .28);
-            filter: brightness(1.04);
-        }
-
-        .facebook-follow .arrow {
-            transition: transform .25s ease;
-        }
-
-        .facebook-follow:hover .arrow {
-            transform: translateX(3px);
-        }
-
-        @media (max-width: 600px) {
-            .facebook-page-bar {
-                padding: 0 16px 18px;
-            }
-
-            .facebook-page-card {
-                align-items: flex-start;
-                flex-direction: column;
-                gap: 14px;
-                padding: 15px;
-            }
-
-            .facebook-follow {
-                width: 100%;
-            }
-        }
-
-        /* ============ MOBILE ============ */
-        @media (max-width: 600px) {
-            .masthead-top {
-                padding: 12px 16px 0;
-            }
-
-            .masthead-main {
-                padding: 6px 16px 18px;
-            }
-
-            .controls {
-                padding: 18px 16px 0;
-            }
-
-            main {
-                padding: 18px 16px 15px;
-            }
-
-            .section-title {
-                font-size: 21px;
-            }
-
-            .news-grid {
-                grid-template-columns: 1fr;
-            }
-
-            .card-image,
-            .image-placeholder {
-                height: 210px;
-            }
-
-            #new-news {
-                padding: 11px 16px;
-            }
-        }
-    </style>
+    <link rel="stylesheet" href="/static/app.css?v=11">
+
+    <script>
+        // Apply the saved theme before first paint to avoid a flash.
+        try {
+            const t = JSON.parse(localStorage.getItem("bn-theme"));
+            if (t) document.documentElement.dataset.theme = t;
+        } catch { }
+    </script>
 </head>
 
 <body>
 
-    <header>
-        <div class="masthead-top">
-            <span class="edition">Bangladesh Edition</span>
-            <button id="theme-toggle" class="theme-toggle" aria-label="Toggle dark mode">
-                <span id="theme-icon">🌙</span> <span id="theme-label">Dark</span>
-            </button>
-            <span id="masthead-date"></span>
-        </div>
-        <div class="masthead-main">
-            <h1 class="logo">Bengali<em>News</em></h1>
-            <p class="tagline">Fast, accurate, reliable news from Bangladesh</p>
-        </div>
-    </header>
+    <div class="stripe" aria-hidden="true"><span></span><span></span><span></span></div>
 
-    <section class="facebook-page-bar" aria-label="Facebook Page">
-        <div class="facebook-page-card">
-            <div class="facebook-page-info">
-                <div class="facebook-icon" aria-hidden="true">
-                    <svg viewBox="0 0 24 24" role="img">
-                        <path
-                            d="M13.5 21v-8h2.7l.4-3h-3.1V8.1c0-.9.3-1.5 1.6-1.5h1.7V3.9c-.3 0-1.3-.1-2.5-.1-2.5 0-4.2 1.5-4.2 4.3V10H7.4v3h2.7v8h3.4z" />
-                    </svg>
-                </div>
-                <div class="facebook-copy">
-                    <p class="facebook-kicker">Follow our updates</p>
-                    <h2 class="facebook-title">Bengali News — Facebook Page</h2>
-                    <p class="facebook-subtitle">Latest news posts are published automatically on our official page.</p>
-                </div>
+    <div class="app">
+
+        <!-- ================= LEFT RAIL (desktop) ================= -->
+        <aside class="rail" aria-label="Main navigation">
+            <a class="logo" href="#/" aria-label="News home"><span class="flag" aria-hidden="true"><svg viewBox="0 0 30 20" preserveAspectRatio="xMidYMid slice"><rect width="30" height="20" fill="#149954"/><rect width="30" height="13.34" fill="#FFFFFF"/><rect width="30" height="6.67" fill="#0F110E"/><path d="M0 0 13 10 0 20z" fill="#D61F2C"/></svg></span><span class="logo-word">News</span><i class="logo-dot" aria-hidden="true"></i></a>
+
+            <nav class="rail-nav" data-nav></nav>
+
+            <section class="rail-card" aria-label="Trending now">
+                <h4>Trending now</h4>
+                <ol class="trend-list" id="trend-list"></ol>
+            </section>
+
+            <section class="rail-card" aria-label="Most active outlets">
+                <h4>Most active</h4>
+                <div class="active-list" id="active-list"></div>
+            </section>
+
+            <div class="rail-block" id="rail-interests" hidden>
+                <h4>Your interests</h4>
+                <div class="interest-list" id="interest-list"></div>
+                <button class="text-btn" id="reset-profile" type="button">Reset personalisation</button>
             </div>
 
-            <a class="facebook-follow" href="https://www.facebook.com/profile.php?id=61593758413778" target="_blank"
-                rel="noopener noreferrer" aria-label="Visit Bengali News Facebook Page">
-                Visit Facebook Page
-                <span class="arrow" aria-hidden="true">↗</span>
-            </a>
-        </div>
-    </section>
+            <div class="rail-foot">
+                <button class="install-btn" id="install-btn" type="button" hidden>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M7 10l5 5 5-5M5 21h14" /></svg>
+                    Install app
+                </button>
+                <a href="https://www.facebook.com/profile.php?id=61593758413778" target="_blank" rel="noopener noreferrer">Facebook ↗</a>
+            </div>
+        </aside>
 
-    <div id="new-news"><span class="star">★</span>New news available — click to view</div>
+        <!-- ================= MAIN COLUMN ================= -->
+        <div class="main-col">
 
-    <div class="controls">
-        <div class="search-wrap">
-            <input id="search" class="search" type="text" placeholder="Search news…">
+            <header class="topbar">
+                <a class="logo logo-sm" href="#/" aria-label="News home"><span class="flag" aria-hidden="true"><svg viewBox="0 0 30 20" preserveAspectRatio="xMidYMid slice"><rect width="30" height="20" fill="#149954"/><rect width="30" height="13.34" fill="#FFFFFF"/><rect width="30" height="6.67" fill="#0F110E"/><path d="M0 0 13 10 0 20z" fill="#D61F2C"/></svg></span><span class="logo-word">News</span><i class="logo-dot" aria-hidden="true"></i></a>
+
+                <button class="search-trigger" id="search-trigger" type="button" aria-label="Search">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
+                    <span>Search stories, topics, videos…</span>
+                    <kbd>Ctrl K</kbd>
+                </button>
+
+                <div class="topbar-actions">
+                    <span class="live-pill" id="live-pill"><i></i><span id="live-text">Live</span></span>
+                    <span class="streak" id="streak" hidden title="Days in a row you've visited">
+                        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2s5 4.2 5 9.3c0 1.6-.6 3-1.5 4 .2-2.1-1-3.8-2.5-4.8.3 2.4-1.2 3.6-2.4 4.3-.9-1.1-1.1-2.6-.6-4.1C7.6 12 6 14.3 6 17c0 .6.1 1.2.3 1.7C4.9 17.4 4 15.6 4 13.5 4 8.6 9.5 6.5 12 2z" /></svg>
+                        <b id="streak-count">1</b>
+                    </span>
+                    <button class="icon-btn search-icon" id="search-icon" type="button" aria-label="Search">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
+                    </button>
+                    <button class="icon-btn theme-btn" id="theme-btn" type="button" aria-label="Toggle dark mode">
+                        <svg class="moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" /></svg>
+                        <svg class="sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4.5" /><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" /></svg>
+                    </button>
+                </div>
+            </header>
+
+            <div class="ticker" id="ticker" role="region" aria-label="Live Palestine headlines" hidden>
+                <a class="ticker-label" href="#/palestine">
+                    <span class="flag round" aria-hidden="true"><svg viewBox="0 0 30 20" preserveAspectRatio="xMidYMid slice"><rect width="30" height="20" fill="#149954"/><rect width="30" height="13.34" fill="#FFFFFF"/><rect width="30" height="6.67" fill="#0F110E"/><path d="M0 0 13 10 0 20z" fill="#D61F2C"/></svg></span>
+                    <span class="ticker-live"><i></i>Live</span>
+                    <b>Palestine</b>
+                </a>
+                <div class="ticker-track">
+                    <div class="ticker-items" id="ticker-items"></div>
+                </div>
+                <button class="ticker-toggle" id="ticker-toggle" type="button" aria-label="Pause headlines" aria-pressed="false">
+                    <svg class="i-pause" viewBox="0 0 24 24" fill="currentColor"><rect x="6.5" y="5" width="3.6" height="14" rx="1.2" /><rect x="13.9" y="5" width="3.6" height="14" rx="1.2" /></svg>
+                    <svg class="i-play" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.5v13l10.5-6.5z" /></svg>
+                </button>
+            </div>
+
+            <button class="fresh-pill" id="fresh-pill" type="button" hidden>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7" /></svg>
+                <span id="fresh-text">New stories</span>
+            </button>
+
+            <main id="main">
+
+                <!-- ============ FOR YOU ============ -->
+                <section class="view" data-view="foryou" hidden>
+                    <div class="hello">
+                        <p class="eyebrow" id="hello-date"></p>
+                        <h1 class="hello-title" id="hello-title">Your feed</h1>
+                        <p class="hello-sub" id="hello-sub">Everything that happened in the last 24 hours, ranked for you.</p>
+                    </div>
+
+                    <div class="stories" id="stories" aria-label="Stories by source"></div>
+
+                    <div class="onboard" id="onboard" hidden>
+                        <div>
+                            <h3>What do you want more of?</h3>
+                            <p>Pick a few. Your feed learns from what you read, watch and save, and it all stays on this device.</p>
+                        </div>
+                        <div class="onboard-chips" id="onboard-chips"></div>
+                        <button class="btn" id="onboard-done" type="button">Build my feed</button>
+                    </div>
+
+                    <div class="topic-row" id="topic-row"></div>
+
+                    <div class="feed stack" id="feed"></div>
+                    <div class="sentinel" id="feed-sentinel"></div>
+                    <div class="caught-up" id="caught-up" hidden>
+                        <div class="check"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg></div>
+                        <h3>You're all caught up</h3>
+                        <p>You've seen the latest stories from the past 24 hours.</p>
+                        <div class="caught-actions">
+                            <a class="btn" href="#/shorts">Watch Shorts</a>
+                            <button class="btn ghost" id="replay-feed" type="button">Show stories you've seen</button>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- ============ BANGLADESH ============ -->
+                <section class="view" data-view="bangladesh" hidden>
+                    <div class="band band-bd">
+                        <div>
+                            <p class="eyebrow">Bangladesh edition · Last 24 hours</p>
+                            <h1 class="band-title">Bangladesh <em>now</em></h1>
+                            <p class="band-sub">Headlines from the country's leading newspapers, refreshed every few minutes.</p>
+                        </div>
+                        <div class="stats">
+                            <div class="stat"><b id="bd-total">—</b><span>Stories</span></div>
+                            <div class="stat"><b id="bd-sources">—</b><span>Papers</span></div>
+                            <div class="stat"><b id="bd-hour">—</b><span>Last hour</span></div>
+                        </div>
+                    </div>
+
+                    <div class="toolbar">
+                        <div class="chips" id="bd-chips" role="group" aria-label="Filter by source"></div>
+                        <div class="seg" role="group" aria-label="Sort">
+                            <button data-bd-sort="latest" aria-pressed="true">Latest</button>
+                            <button data-bd-sort="foryou" aria-pressed="false">For you</button>
+                        </div>
+                    </div>
+
+                    <div id="bd-lead"></div>
+                    <div class="grid stack" id="bd-grid"></div>
+                    <div class="sentinel" id="bd-sentinel"></div>
+                </section>
+
+                <!-- ============ PALESTINE ============ -->
+                <section class="view" data-view="palestine" hidden>
+                    <!-- Same size as the Bangladesh banner. Each row is one stripe of the flag,
+                         so every line of text sits on the stripe it reads best on. -->
+                    <div class="band band-pal">
+                        <span class="flag-tri" aria-hidden="true"></span>
+                        <div class="pal-row pal-black">
+                            <p class="eyebrow">● Live desk <span class="hide-xs">· Last 24 hours</span> · Updated <span id="pal-updated">—</span></p>
+                            <h1 class="band-title">Palestine <em>today</em></h1>
+                        </div>
+                        <div class="pal-row pal-white">
+                            <p class="band-sub">Gaza, the West Bank and Jerusalem: reporting and video from independent Palestinian voices and international newsrooms.</p>
+                        </div>
+                        <div class="pal-row pal-green">
+                            <div class="stats">
+                                <div class="stat"><b id="pal-articles">—</b><span>Reports</span></div>
+                                <div class="stat"><b id="pal-videos">—</b><span>Videos</span></div>
+                                <div class="stat"><b id="pal-sources">—</b><span>Outlets</span></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="toolbar">
+                        <div class="chips" id="pal-chips" role="group" aria-label="Filter by outlet"></div>
+                        <div class="seg" id="pal-lang" role="group" aria-label="Language" hidden>
+                            <button data-pal-lang="" aria-pressed="true">All</button>
+                            <button data-pal-lang="en" aria-pressed="false">EN</button>
+                            <button data-pal-lang="bn" aria-pressed="false">বাংলা</button>
+                        </div>
+                    </div>
+
+                    <div id="pal-lead"></div>
+
+                    <div class="section-h" id="pal-watch-h">
+                        <h2>Shorts &amp; video</h2><a href="#/shorts">Open Shorts →</a>
+                    </div>
+                    <div class="shelf" id="pal-shelf"></div>
+
+                    <div class="section-h">
+                        <h2>Latest reports</h2><span class="meta" id="pal-count"></span>
+                    </div>
+                    <div class="grid stack" id="pal-grid"></div>
+                    <div class="sentinel" id="pal-sentinel"></div>
+
+                    <details class="sources-panel">
+                        <summary>Where this coverage comes from <span id="pal-sources-summary"></span></summary>
+                        <div class="table-scroll">
+                            <table class="sources-table">
+                                <thead>
+                                    <tr>
+                                        <th>Outlet</th>
+                                        <th>Type</th>
+                                        <th class="hide-xs">Feed</th>
+                                        <th>24h</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="pal-sources-body"></tbody>
+                            </table>
+                        </div>
+                    </details>
+                </section>
+
+                <!-- ============ SHORTS ============ -->
+                <section class="view view-shorts" data-view="shorts" hidden>
+                    <div class="shorts" id="shorts" tabindex="-1" aria-label="Short videos"></div>
+                </section>
+
+                <!-- ============ LIBRARY ============ -->
+                <section class="view" data-view="saved" hidden>
+                    <div class="band band-plain">
+                        <div>
+                            <p class="eyebrow">Library</p>
+                            <h1 class="band-title">Your <em>library</em></h1>
+                            <p class="band-sub">Saved stories stay here even after the news is cleared from the live feed. Everything is stored on this device only.</p>
+                        </div>
+                    </div>
+                    <div class="toolbar">
+                        <div class="seg" role="group" aria-label="Library">
+                            <button data-lib="saved" aria-pressed="true">Saved</button>
+                            <button data-lib="history" aria-pressed="false">History</button>
+                        </div>
+                    </div>
+                    <div class="grid stack" id="lib-grid"></div>
+                </section>
+
+            </main>
+
+            <div class="page-end">
+                <button class="back-top" id="back-top" type="button">
+                    <span class="back-top-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7" /></svg></span>
+                    Back to top
+                </button>
+            </div>
+
+            <footer class="site-foot">
+                <p>News shows headlines, short summaries and links from public news feeds. Every story belongs to its original publisher, so click through to read it in full. The live feed covers the last 24 hours.</p>
+                <p>© <span id="year"></span> News · <a href="https://www.facebook.com/profile.php?id=61593758413778" target="_blank" rel="noopener noreferrer">Facebook</a></p>
+            </footer>
         </div>
-        <select id="source">
-            <option value="">All Sources</option>
-        </select>
+
     </div>
 
-    <main>
-        <div class="section-header">
-            <h2 class="section-title">Latest News</h2>
-            <div id="result-count" class="result-count"></div>
-        </div>
+    <!-- ================= BOTTOM NAV (mobile) ================= -->
+    <nav class="bottom-nav" data-nav aria-label="Main navigation"></nav>
 
-        <div id="news" class="news-grid"></div>
-        <div id="pagination" class="pagination"></div>
-    </main>
-
-    <script>
-
-        /* =========================
-           CONFIG
-        ========================= */
-        const CONFIG = {
-            API_BASE: "auto",
-            NEWS_PER_PAGE: 12,
-            NEW_NEWS_CHECK_INTERVAL: 30000,
-            SEARCH_DEBOUNCE: 400
-        };
-
-        /*
-         * API configuration:
-         * - Local development uses http://127.0.0.1:8000/api
-         * - Vercel production uses the same-domain /api endpoint
-         * - "auto" selects the correct one automatically.
-         */
-        function getApiBase() {
-            if (
-                CONFIG.API_BASE === "auto" &&
-                (
-                    window.location.hostname === "localhost" ||
-                    window.location.hostname === "127.0.0.1"
-                )
-            ) {
-                return "http://127.0.0.1:8000/api";
-            }
-
-            if (CONFIG.API_BASE === "auto") {
-                return "/api";
-            }
-
-            return CONFIG.API_BASE.replace(/\/$/, "");
-        }
-
-        function apiUrl(path = "") {
-            const base = getApiBase();
-            const endpoint = String(path).replace(/^\//, "");
-
-            return endpoint
-                ? `${base}/${endpoint}`
-                : base;
-        }
-
-        async function apiFetch(path = "", options = {}) {
-            const url = apiUrl(path);
-            console.log("API Request:", url);
-            return fetch(url, options);
-        }
-
-        /* =========================
-           STATE
-        ========================= */
-        let currentPage = 1;
-        let searchTimer = null;
-        let latestKnownId = null;
-
-        /* =========================
-           DOM
-        ========================= */
-        const newsContainer = document.getElementById("news");
-        const pagination = document.getElementById("pagination");
-        const search = document.getElementById("search");
-        const source = document.getElementById("source");
-        const resultCount = document.getElementById("result-count");
-        const newNews = document.getElementById("new-news");
-        const themeToggle = document.getElementById("theme-toggle");
-        const themeIcon = document.getElementById("theme-icon");
-        const themeLabel = document.getElementById("theme-label");
-        const mastheadDate = document.getElementById("masthead-date");
-
-        /* =========================
-           THEME
-        ========================= */
-        function applyTheme(theme) {
-            document.documentElement.setAttribute("data-theme", theme);
-            if (theme === "dark") {
-                themeIcon.textContent = "☀️";
-                themeLabel.textContent = "Light";
-            } else {
-                themeIcon.textContent = "🌙";
-                themeLabel.textContent = "Dark";
-            }
-        }
-
-        themeToggle.addEventListener("click", () => {
-            const current = document.documentElement.getAttribute("data-theme");
-            applyTheme(current === "dark" ? "light" : "dark");
-        });
-
-        // Default to the visitor's system preference, in-memory only.
-        applyTheme(window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
-
-        /* =========================
-           MASTHEAD DATE
-        ========================= */
-        mastheadDate.textContent = new Date().toLocaleDateString(undefined, {
-            weekday: "long", day: "numeric", month: "long", year: "numeric"
-        });
-
-        /* =========================
-           LOAD SOURCES
-        ========================= */
-        async function loadSources() {
-            try {
-                const response = await apiFetch("sources");
-                if (!response.ok) throw new Error("Source API failed");
-                const sources = await response.json();
-                sources.forEach(item => {
-                    const option = document.createElement("option");
-                    option.value = item;
-                    option.textContent = item;
-                    source.appendChild(option);
-                });
-            } catch (error) {
-                console.error("Source loading error:", error);
-            }
-        }
-
-        /* =========================
-           LOAD NEWS
-        ========================= */
-        async function loadNews(page = 1) {
-            currentPage = page;
-
-            newsContainer.innerHTML = `
-        <div class="loading">
-          <div class="spinner"></div>
-          Loading news...
-        </div>
-      `;
-
-            const params = new URLSearchParams();
-            params.set("page", page);
-            params.set("limit", CONFIG.NEWS_PER_PAGE);
-            if (source.value) params.set("source", source.value);
-            if (search.value.trim()) params.set("search", search.value.trim());
-
-            try {
-                const response = await apiFetch(`news?${params}`);
-                if (!response.ok) throw new Error("News API failed");
-                const data = await response.json();
-
-                renderNews(data.news);
-                renderPagination(data.page, data.total_pages);
-                resultCount.textContent = `${data.total} stories`;
-
-                if (page === 1 && data.news.length > 0) {
-                    latestKnownId = data.news[0].id;
-                }
-            } catch (error) {
-                console.error("News loading error:", error);
-                newsContainer.innerHTML = `
-          <div class="empty">
-            <div class="empty-icon">⚠</div>
-            <div>Failed to load news.</div>
-          </div>
-        `;
-            }
-        }
-
-        /* =========================
-           RENDER NEWS
-        ========================= */
-        function renderNews(news) {
-            if (!news.length) {
-                newsContainer.innerHTML = `
-          <div class="empty">
-            <div class="empty-icon">✦</div>
-            <div>No news found.</div>
-          </div>
-        `;
-                return;
-            }
-
-            newsContainer.innerHTML = "";
-
-            const canTilt = window.matchMedia("(hover: hover) and (pointer: fine)").matches
-                && !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-
-            news.forEach((item, index) => {
-                const card = document.createElement("article");
-                card.className = "card";
-                card.dataset.newsId = item.id;
-                card.style.setProperty("--i", index);
-
-                let imageHTML;
-                if (item.image) {
-                    imageHTML = `
-            <img
-              class="card-image"
-              src="${escapeHtml(item.image)}"
-              alt="${escapeHtml(item.title)}"
-              loading="lazy"
-              onerror="this.outerHTML='<div class=&quot;image-placeholder&quot;>✦</div>'"
-            >
-          `;
-                } else {
-                    imageHTML = `<div class="image-placeholder">✦</div>`;
-                }
-
-                card.innerHTML = `
-          <a class="card-media" href="${escapeHtml(item.url)}" target="_blank" rel="noopener noreferrer" tabindex="-1" aria-hidden="true">
-            ${imageHTML}
-            <div class="media-scrim"></div>
-            <span class="media-arrow">↗</span>
-          </a>
-          <div class="card-content">
-            <div class="source">${escapeHtml(item.source)}</div>
-            <div class="title">${escapeHtml(item.title)}</div>
-            ${item.description ? `<div class="description">${escapeHtml(item.description)}</div>` : ""}
-            <div class="meta">
-              <span>${timeAgo(item.published_at)}</span>
-              <a class="read" href="${escapeHtml(item.url)}" target="_blank" rel="noopener noreferrer">
-                Read <span class="arrow">→</span>
-              </a>
+    <!-- ================= OVERLAYS ================= -->
+    <dialog class="watch" id="watch" aria-label="Video player">
+        <div class="watch-main">
+            <button class="icon-btn watch-close" data-close type="button" aria-label="Close video"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18" /></svg></button>
+            <div class="watch-player">
+                <div id="watch-player"></div>
+                <div class="up-next-overlay" id="up-next-overlay" hidden>
+                    <span>Up next in <b id="up-next-count">5</b></span>
+                    <strong id="up-next-title"></strong>
+                    <div>
+                        <button class="btn" id="up-next-play" type="button">Play now</button>
+                        <button class="btn ghost light" id="up-next-cancel" type="button">Cancel</button>
+                    </div>
+                </div>
             </div>
-          </div>
-        `;
+            <div class="watch-info">
+                <div class="kicker" id="watch-kicker"></div>
+                <h3 id="watch-title"></h3>
+                <p id="watch-dek"></p>
+                <div class="watch-actions" id="watch-actions"></div>
+            </div>
+        </div>
+        <aside class="watch-next">
+            <div class="watch-next-head">
+                <h4>Up next</h4>
+                <label class="switch"><input type="checkbox" id="autoplay-toggle" checked><span></span>Autoplay</label>
+            </div>
+            <div id="watch-next-list"></div>
+        </aside>
+    </dialog>
 
-                if (canTilt) {
-                    attachCardInteraction(card);
-                } else {
-                    card.addEventListener("mouseenter", () => card.classList.add("is-hovering"));
-                }
-                card.addEventListener("mouseleave", () => card.classList.remove("is-hovering"));
+    <dialog class="story-viewer" id="story-viewer" aria-label="Stories">
+        <div class="story-frame" id="story-frame">
+            <div class="story-bars" id="story-bars"></div>
+            <div class="story-head">
+                <span class="avatar" id="story-avatar"></span>
+                <div><b id="story-source"></b><small id="story-time"></small></div>
+                <button class="icon-btn story-close" data-close type="button" aria-label="Close stories"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18" /></svg></button>
+            </div>
+            <div class="story-media" id="story-media"></div>
+            <div class="story-body">
+                <h2 id="story-title"></h2>
+                <p id="story-dek"></p>
+                <a class="btn" id="story-link" target="_blank" rel="noopener noreferrer">Read full story ↗</a>
+            </div>
+            <button class="story-tap prev" id="story-prev" type="button" aria-label="Previous story"></button>
+            <button class="story-tap next" id="story-next" type="button" aria-label="Next story"></button>
+        </div>
+    </dialog>
 
-                newsContainer.appendChild(card);
-            });
-        }
+    <dialog class="palette" id="palette" aria-label="Search">
+        <div class="palette-box">
+            <label class="palette-input">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
+                <span class="sr-only">Search</span>
+                <input type="search" id="palette-input" placeholder="Search stories, topics, videos…" autocomplete="off">
+                <kbd>Esc</kbd>
+            </label>
+            <div class="palette-results" id="palette-results" role="listbox"></div>
+        </div>
+    </dialog>
 
-        /* =========================
-           CARD TILT + SPOTLIGHT
-        ========================= */
-        function attachCardInteraction(card) {
-            const maxTilt = 5; // degrees
+    <button class="to-top" id="to-top" type="button" aria-label="Back to top"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7" /></svg></button>
 
-            card.addEventListener("mousemove", (e) => {
-                const rect = card.getBoundingClientRect();
-                const px = (e.clientX - rect.left) / rect.width;
-                const py = (e.clientY - rect.top) / rect.height;
+    <div class="toast" id="toast" role="status" aria-live="polite"><span id="toast-text"></span><button id="toast-action" type="button" hidden></button></div>
 
-                const ry = (px - 0.5) * (maxTilt * 2);
-                const rx = (0.5 - py) * (maxTilt * 2);
-
-                card.style.setProperty("--rx", `${rx}deg`);
-                card.style.setProperty("--ry", `${ry}deg`);
-                card.style.setProperty("--mx", `${px * 100}%`);
-                card.style.setProperty("--my", `${py * 100}%`);
-                card.classList.add("is-hovering");
-            });
-
-            card.addEventListener("mouseleave", () => {
-                card.style.setProperty("--rx", "0deg");
-                card.style.setProperty("--ry", "0deg");
-            });
-        }
-
-        /* =========================
-           PAGINATION
-        ========================= */
-        function renderPagination(current, total) {
-            pagination.innerHTML = "";
-            if (total <= 1) return;
-
-            const previous = document.createElement("button");
-            previous.textContent = "← Previous";
-            previous.disabled = current === 1;
-            previous.onclick = () => {
-                if (current > 1) {
-                    loadNews(current - 1);
-                    window.scrollTo({ top: 0, behavior: "smooth" });
-                }
-            };
-            pagination.appendChild(previous);
-
-            let start = Math.max(1, current - 2);
-            let end = Math.min(total, current + 2);
-
-            if (start > 1) {
-                addPageButton(1);
-                if (start > 2) addDots();
-            }
-
-            for (let i = start; i <= end; i++) addPageButton(i);
-
-            if (end < total) {
-                if (end < total - 1) addDots();
-                addPageButton(total);
-            }
-
-            const next = document.createElement("button");
-            next.textContent = "Next →";
-            next.disabled = current === total;
-            next.onclick = () => {
-                if (current < total) {
-                    loadNews(current + 1);
-                    window.scrollTo({ top: 0, behavior: "smooth" });
-                }
-            };
-            pagination.appendChild(next);
-        }
-
-        function addPageButton(page) {
-            const button = document.createElement("button");
-            button.textContent = page;
-            if (page === currentPage) button.className = "active";
-            button.onclick = () => {
-                loadNews(page);
-                window.scrollTo({ top: 0, behavior: "smooth" });
-            };
-            pagination.appendChild(button);
-        }
-
-        function addDots() {
-            const dots = document.createElement("span");
-            dots.textContent = "...";
-            dots.style.padding = "0 6px";
-            dots.style.color = "var(--text-muted)";
-            pagination.appendChild(dots);
-        }
-
-        /* =========================
-           SEARCH / FILTER
-        ========================= */
-        search.addEventListener("input", () => {
-            clearTimeout(searchTimer);
-            searchTimer = setTimeout(() => loadNews(1), CONFIG.SEARCH_DEBOUNCE);
-        });
-
-        source.addEventListener("change", () => loadNews(1));
-
-        /* =========================
-           CHECK FOR NEW NEWS
-        ========================= */
-        async function checkForNewNews() {
-            try {
-                const response = await apiFetch("news?page=1&limit=1");
-                if (!response.ok) return;
-                const data = await response.json();
-                if (!data.news || data.news.length === 0) return;
-
-                const latestId = data.news[0].id;
-
-                if (latestKnownId === null) {
-                    latestKnownId = latestId;
-                    return;
-                }
-
-                if (latestId !== latestKnownId) {
-                    newNews.style.display = "block";
-                }
-            } catch (error) {
-                console.error("New news check failed:", error);
-            }
-        }
-
-        newNews.addEventListener("click", () => {
-            newNews.style.display = "none";
-            latestKnownId = null;
-            loadNews(1);
-            window.scrollTo({ top: 0, behavior: "smooth" });
-        });
-
-        /* =========================
-           TIME AGO
-        ========================= */
-        function timeAgo(dateString) {
-            if (!dateString) return "";
-            const date = new Date(dateString);
-            if (Number.isNaN(date.getTime())) return "";
-
-            const seconds = Math.floor((Date.now() - date.getTime()) / 1000);
-            if (seconds < 60) return "Just now";
-
-            const minutes = Math.floor(seconds / 60);
-            if (minutes < 60) return `${minutes}m ago`;
-
-            const hours = Math.floor(minutes / 60);
-            if (hours < 24) return `${hours}h ago`;
-
-            const days = Math.floor(hours / 24);
-            if (days < 7) return `${days}d ago`;
-
-            return date.toLocaleDateString();
-        }
-
-        /* =========================
-           HTML ESCAPE
-        ========================= */
-        function escapeHtml(value) {
-            return String(value)
-                .replaceAll("&", "&amp;")
-                .replaceAll("<", "&lt;")
-                .replaceAll(">", "&gt;")
-                .replaceAll('"', "&quot;")
-                .replaceAll("'", "&#039;");
-        }
-
-        /* =========================
-           INITIAL LOAD
-        ========================= */
-        async function initialize() {
-            await loadSources();
-            await loadNews(1);
-        }
-
-        initialize();
-
-        setInterval(checkForNewNews, CONFIG.NEW_NEWS_CHECK_INTERVAL);
-
-    </script>
-
+    <script src="/static/app.js?v=10" defer></script>
 </body>
 
 </html>
